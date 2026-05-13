@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 Standard (Bản ổn định + Hiển thị tiến độ)
-# Hỗ trợ: Rocky Linux, CentOS - Tương thích mọi Router
+# Script: Auto Proxy IPv6 /64 Standard (Bản có Tiến độ Real-time)
 # ==============================================================================
 
 # 1. Khởi tạo card mạng
@@ -14,7 +13,7 @@ fi
 
 clear
 echo "=========================================================="
-echo "   TOOL AUTO PROXY V6 - BẢN GỐC /64 (STABLE)             "
+echo "   TOOL AUTO PROXY V6 - REAL-TIME PROGRESS               "
 echo "=========================================================="
 
 # 2. Nhập liệu
@@ -64,35 +63,35 @@ gen_ipv6_64() {
     echo "$PREFIX:$(rd):$(rd):$(rd):$(rd)"
 }
 
-# 7. Xóa IP rác và khởi tạo
-echo "⏳ Đang cấu hình $PROXY_COUNT IP ảo..."
+# 7. Tạo danh sách cấu hình
+echo "⏳ Bước 1: Đang khởi tạo danh sách cấu hình..."
 pkill 3proxy > /dev/null 2>&1
 ip -6 addr flush dev $INTERFACE scope global > /dev/null 2>&1
 nmcli connection up $INTERFACE > /dev/null 2>&1
 sleep 1
 
-count=0
 exec 3> "$WORKDATA"
-exec 4> "${WORKDIR}/boot_ifconfig.sh"
 for port in $(seq $FIRST_PORT $((FIRST_PORT + PROXY_COUNT - 1))); do
     ipv6_rand=$(gen_ipv6_64)
     echo "//$IP4/$port/$ipv6_rand" >&3
-    echo "ip -6 addr add $ipv6_rand/64 dev $INTERFACE" >&4
-    
-    # Hiển thị tiến độ nhảy số
-    count=$((count + 1))
-    if (( count % 20 == 0 || count == PROXY_COUNT )); then
-        echo -ne "   [+] Tiến độ: $count / $PROXY_COUNT \r"
-    fi
 done
 exec 3>&-
-exec 4>&-
-echo -e "\n✨ Đã khởi tạo xong danh sách IP!"
 
-# 8. Chạy lệnh gán IP và cấu hình 3proxy
-chmod +x ${WORKDIR}/boot_ifconfig.sh
-bash ${WORKDIR}/boot_ifconfig.sh
+# 8. Nạp IP vào card mạng với thanh TIẾN ĐỘ REAL-TIME
+echo "⏳ Bước 2: Đang nạp IP vào card mạng (Vui lòng đợi)..."
+count=0
+for ipv6 in $(awk -F "/" '{print $5}' "$WORKDATA"); do
+    ip -6 addr add "$ipv6/64" dev "$INTERFACE"
+    count=$((count + 1))
+    
+    # Hiển thị nhảy số Real-time tại đây
+    if (( count % 10 == 0 || count == PROXY_COUNT )); then
+        echo -ne "   [+] Đang nạp: $count / $PROXY_COUNT \r"
+    fi
+done
+echo -e "\n✅ Đã nạp xong $count IP vào hệ thống."
 
+# 9. Ghi Config 3proxy
 cat <<EOF > /usr/local/etc/3proxy/3proxy.cfg
 daemon
 maxconn 10000
@@ -104,19 +103,21 @@ allow *
 $(awk -F "/" '{print "proxy -6 -n -a -p"$4" -i"$3" -e"$5}' ${WORKDATA})
 EOF
 
-# 9. Tự động chạy khi reboot
+# 10. Tự động chạy khi reboot
 chmod +x /etc/rc.d/rc.local
 sed -i '/3proxy/d' /etc/rc.d/rc.local
-sed -i '/boot_ifconfig.sh/d' /etc/rc.d/rc.local
+# Tạo file boot đơn giản để nạp IP khi khởi động lại
+echo "ip -6 addr flush dev $INTERFACE scope global" > "${WORKDIR}/boot_ifconfig.sh"
+awk -F "/" '{print "ip -6 addr add "$5"/64 dev '$INTERFACE'"}' "$WORKDATA" >> "${WORKDIR}/boot_ifconfig.sh"
 echo "bash ${WORKDIR}/boot_ifconfig.sh" >> /etc/rc.d/rc.local
 echo "/usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg" >> /etc/rc.d/rc.local
 
-# Khởi chạy
+# Khởi chạy 3proxy
 ulimit -n 999999
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
 awk -F "/" '{print $3":"$4}' ${WORKDATA} > ${WORKDIR}/proxy.txt
 
 echo "=========================================================="
 echo "✅ HOÀN TẤT! Proxy đã sẵn sàng."
-echo "📂 Danh sách lưu tại: ${WORKDIR}/proxy.txt"
+echo "📂 List proxy: ${WORKDIR}/proxy.txt"
 echo "=========================================================="
