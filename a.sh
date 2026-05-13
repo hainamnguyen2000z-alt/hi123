@@ -1,180 +1,119 @@
 #!/bin/bash
+
 # ==============================================================================
-# Script: Auto Setup IPv6 Proxy (3proxy)
-# Description: Tự động cài đặt 3proxy và tạo hàng loạt Proxy IPv6
-# Author: Tên_Của_Bạn_Hoặc_Github_ID
-# Version: 1.0
+# Script: Auto Proxy IPv6 /60 Optimized
+# Hỗ trợ: Rocky Linux, dải /60 từ MikroTik/ISP
 # ==============================================================================
 
-GREEN='\03引[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
-
-# Kiểm tra quyền Root
-if [ "$(id -u)" != "0" ]; then
-    echo -e "${RED}[-] Script này cần được chạy bằng quyền Root! Vui lòng dùng lệnh 'sudo -i' rồi chạy lại.${NC}"
-    exit 1
+# 1. Fix lỗi mạng và lấy Interface
+INTERFACE=$(ip route get 8.8.8.8 | awk '{print $5; exit}' 2>/dev/null)
+if [ -n "$INTERFACE" ]; then
+    nmcli connection modify "$INTERFACE" connection.autoconnect yes >/dev/null 2>&1
+    nmcli device connect "$INTERFACE" >/dev/null 2>&1
 fi
 
 clear
-echo -e "${GREEN}==========================================================${NC}"
-echo -e "${GREEN}   AUTO SETUP & CREATE PROXY IPV6 - GITHUB VERSION        ${NC}"
-echo -e "${GREEN}==========================================================${NC}"
-echo ""
+echo "=========================================================="
+echo "   TOOL AUTO PROXY V6 - OPTIMIZED FOR /60 SUBNET         "
+echo "=========================================================="
 
-# 1. Xử lý tham số đầu vào hoặc hỏi người dùng (Hỗ trợ chạy qua curl piped)
-if [ -n "$1" ] && [ -n "$2" ]; then
-    FIRST_PORT=$1
-    PROXY_COUNT=$2
-else
-    while true; do
-        read -p "Nhập cổng bắt đầu (Ví dụ: 10000): " INPUT_PORT < /dev/tty
-        FIRST_PORT=$((10#$INPUT_PORT))
-        if [[ "$FIRST_PORT" -ge 1 && "$FIRST_PORT" -le 65535 ]]; then
-            break
-        else
-            echo -e "${RED}-> LỖI: Cổng không hợp lệ! Nhập từ 1 đến 65535.${NC}"
-        fi
-    done
+# 2. Nhập liệu
+read -p "Nhập cổng bắt đầu (VD: 10000): " INPUT_PORT < /dev/tty
+FIRST_PORT=$((10#$INPUT_PORT))
+read -p "Nhập số lượng proxy: " PROXY_COUNT < /dev/tty
 
-    while true; do
-        read -p "Nhập số lượng proxy muốn tạo (Tối đa 60000): " PROXY_COUNT < /dev/tty
-        if [[ "$PROXY_COUNT" -gt 0 && "$PROXY_COUNT" -le 60000 ]]; then
-            if [[ $((FIRST_PORT + PROXY_COUNT - 1)) -le 65535 ]]; then
-                break
-            else
-                echo -e "${RED}-> LỖI: Cổng kết thúc vượt quá 65535. Hãy giảm số lượng!${NC}"
-            fi
-        else
-            echo -e "${RED}-> LỖI: Số lượng không hợp lệ!${NC}"
-        fi
-    done
-fi
-
-LAST_PORT=$((FIRST_PORT + PROXY_COUNT - 1))
 WORKDIR="/home/proxy-v6"
 WORKDATA="${WORKDIR}/data.txt"
+mkdir -p $WORKDIR
 
-# 2. Dọn dẹp máy chủ và Flush IPv6 cũ
-echo -e "${YELLOW}⏳ Đang dọn dẹp hệ thống và làm sạch IP cũ...${NC}"
-pkill 3proxy > /dev/null 2>&1
-INTERFACE=$(ip route get 8.8.8.8 | awk '{print $5; exit}')
-ip -6 addr flush dev $INTERFACE scope global
-systemctl restart NetworkManager
-sleep 3
-echo -e "${GREEN}✅ Dọn dẹp hệ thống thành công!${NC}"
-
-# 3. Tự động cài đặt nếu máy mới tinh chưa có 3proxy
+# 3. Cài đặt môi trường & 3proxy
 if [ ! -f "/usr/local/etc/3proxy/bin/3proxy" ]; then
-    echo -e "${YELLOW}⏳ Đang tải thư viện và biên dịch 3proxy...${NC}"
-    dnf install wget tar zip curl nano git make gcc net-tools -y > /dev/null 2>&1
+    echo "⏳ Đang cài đặt thư viện và build 3proxy..."
+    dnf install epel-release -y > /dev/null 2>&1
+    dnf install wget curl net-tools gcc make -y > /dev/null 2>&1
     cd /root || exit
-    rm -rf 3proxy-*
     wget -q https://github.com/z3APA3A/3proxy/archive/refs/tags/0.9.4.tar.gz
-    tar xzf 0.9.4.tar.gz
-    cd 3proxy-0.9.4 || exit
+    tar xzf 0.9.4.tar.gz && cd 3proxy-0.9.4 || exit
     make -f Makefile.Linux > /dev/null 2>&1
     mkdir -p /usr/local/etc/3proxy/{bin,logs,stat}
     cp bin/3proxy /usr/local/etc/3proxy/bin/
     chmod +x /usr/local/etc/3proxy/bin/3proxy
 fi
 
-# 4. Tối ưu Kernel và Firewall
-echo "net.ipv6.conf.all.forwarding=1" > /etc/sysctl.d/99-ipv6.conf
-echo "net.ipv6.conf.default.forwarding=1" >> /etc/sysctl.d/99-ipv6.conf
-echo "net.ipv6.conf.all.proxy_ndp=1" >> /etc/sysctl.d/99-ipv6.conf
-echo "net.ipv6.conf.default.proxy_ndp=1" >> /etc/sysctl.d/99-ipv6.conf
-sysctl -p /etc/sysctl.d/99-ipv6.conf > /dev/null 2>&1
+# 4. Tối ưu hệ thống & Firewall
 systemctl stop firewalld > /dev/null 2>&1
-systemctl disable firewalld > /dev/null 2>&1
+setenforce 0 > /dev/null 2>&1
+sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1
+sysctl -w net.ipv6.conf.all.proxy_ndp=1 > /dev/null 2>&1
 
-# 5. Cập nhật thông tin mạng
+# 5. Xử lý IP (Tối ưu cho dải /60)
 IP4=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1)
-IP6=$(curl -6 -s icanhazip.com | cut -f1-4 -d':')
+# Lấy 3 cụm đầu cố định (Ví dụ: 2405:4802:8c10)
+PREFIX=$(curl -6 -s icanhazip.com | cut -f1-3 -d':')
 
-if [ -z "$IP6" ]; then
-    echo -e "${RED}[-] LỖI: Không tìm thấy IPv6! Đảm bảo Router/VPS đã cấp IPv6.${NC}"
+if [ -z "$PREFIX" ]; then
+    echo "[-] LỖI: Không lấy được IPv6 Prefix. Kiểm tra lại kết nối!"
     exit 1
 fi
 
-echo -e "=> Giao diện mạng : ${GREEN}$INTERFACE${NC}"
-echo -e "=> IP LAN (IPv4)  : ${GREEN}$IP4${NC}"
-echo -e "=> Dải IPv6 MỚI   : ${GREEN}$IP6::/64${NC}"
-echo "---------- BẮT ĐẦU TẠO $PROXY_COUNT PROXY ----------"
+echo "=> Dải Prefix phát hiện: $PREFIX::/60"
 
-mkdir -p $WORKDIR
+# 6. Hàm tạo IP ngẫu nhiên trong dải /60
 array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
-gen64() {
-    ip64() { echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"; }
-    echo "$1:$(ip64):$(ip64):$(ip64):$(ip64)"
+gen_ipv6_60() {
+    # Nhóm thứ 4 nhảy ngẫu nhiên từ 0-f để đổi Subnet
+    sub=$(printf "%x" $((RANDOM % 16)))
+    # 4 nhóm cuối ngẫu nhiên
+    rd() { echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"; }
+    echo "$PREFIX:$sub:$(rd):$(rd):$(rd):$(rd)"
 }
 
-# 6. Tính toán Proxy và IP ảo
-count=0
+# 7. Tạo danh sách IP và File Boot
+echo "⏳ Đang khởi tạo $PROXY_COUNT Proxy..."
+pkill 3proxy > /dev/null 2>&1
+ip -6 addr flush dev $INTERFACE scope global > /dev/null 2>&1
+# Giữ lại IP gốc để không mất mạng
+nmcli connection up $INTERFACE > /dev/null 2>&1
+
 exec 3> "$WORKDATA"
 exec 4> "${WORKDIR}/boot_ifconfig.sh"
-
-for port in $(seq $FIRST_PORT $LAST_PORT); do
-    ipv6_rand=$(gen64 "$IP6")
+for port in $(seq $FIRST_PORT $((FIRST_PORT + PROXY_COUNT - 1))); do
+    ipv6_rand=$(gen_ipv6_60)
     echo "//$IP4/$port/$ipv6_rand" >&3
-    echo "ip -6 addr add $ipv6_rand/64 dev $INTERFACE" >&4
-    count=$((count + 1))
-    if (( count % 50 == 0 || count == PROXY_COUNT )); then
-        echo -ne "⏳ Đang tính toán dữ liệu: $count / $PROXY_COUNT proxy \r"
-    fi
+    echo "ip -6 addr add $ipv6_rand/60 dev $INTERFACE" >&4
 done
-echo -ne "✅ Đang tính toán dữ liệu: $PROXY_COUNT / $PROXY_COUNT proxy \n"
 exec 3>&-
 exec 4>&-
 
-# 7. Nạp IP vào card mạng
+# 8. Kích hoạt IP và ghi Config
 chmod +x ${WORKDIR}/boot_ifconfig.sh
-added=0
-while IFS= read -r cmd; do
-    $cmd 2>/dev/null
-    added=$((added + 1))
-    if (( added % 50 == 0 || added == PROXY_COUNT )); then
-        echo -ne "⏳ Đang nạp IP vào hệ thống: $added / $PROXY_COUNT IP \r"
-    fi
-done < "${WORKDIR}/boot_ifconfig.sh"
-echo -ne "✅ Đang nạp IP vào hệ thống: $PROXY_COUNT / $PROXY_COUNT IP \n"
+bash ${WORKDIR}/boot_ifconfig.sh
 
-# 8. Cấu hình 3proxy
-cat <<EOF_PROXY > /usr/local/etc/3proxy/3proxy.cfg
+cat <<EOF > /usr/local/etc/3proxy/3proxy.cfg
 daemon
-maxconn 10000
-nserver 1.1.1.1
+maxconn 20000
 nserver 8.8.8.8
-nserver 2606:4700:4700::1111
+nserver 1.1.1.1
 nserver 2001:4860:4860::8888
 nscache 65536
-timeouts 1 5 30 60 180 1800 15 60
 auth none
 allow *
 $(awk -F "/" '{print "proxy -6 -n -a -p"$4" -i"$3" -e"$5}' ${WORKDATA})
-EOF_PROXY
+EOF
 
-# 9. Ghi đè file khởi động Boot
+# 9. Tự động chạy khi reboot
+chmod +x /etc/rc.d/rc.local
 sed -i '/3proxy/d' /etc/rc.d/rc.local
 sed -i '/boot_ifconfig.sh/d' /etc/rc.d/rc.local
-sed -i '/ulimit -n/d' /etc/rc.d/rc.local
-echo "ulimit -n 999999" >> /etc/rc.d/rc.local
 echo "bash ${WORKDIR}/boot_ifconfig.sh" >> /etc/rc.d/rc.local
 echo "/usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg" >> /etc/rc.d/rc.local
-chmod +x /etc/rc.d/rc.local
 
-# 10. Chạy 3proxy và Xuất file
+# Khởi chạy
 ulimit -n 999999
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
 awk -F "/" '{print $3":"$4}' ${WORKDATA} > ${WORKDIR}/proxy.txt
 
-echo ""
-echo -e "${GREEN}==========================================================${NC}"
-echo -e "${GREEN}    [+] HOÀN TẤT QUÁ TRÌNH TẠO PROXY!                     ${NC}"
-echo -e "${GREEN}==========================================================${NC}"
-echo -e "Danh sách Proxy được lưu tại: ${YELLOW}${WORKDIR}/proxy.txt${NC}"
-echo "----------------------------------------------------------"
-head -n 5 ${WORKDIR}/proxy.txt
-echo "..."
-echo "----------------------------------------------------------"
+echo "=========================================================="
+echo "✅ HOÀN TẤT! Đã tạo $PROXY_COUNT Proxy /60"
+echo "📂 Danh sách lưu tại: ${WORKDIR}/proxy.txt"
+echo "=========================================================="
