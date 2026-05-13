@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 Standard (Bản ổn định)
+# Script: Auto Proxy IPv6 /64 Standard (Bản ổn định + Hiển thị tiến độ)
 # Hỗ trợ: Rocky Linux, CentOS - Tương thích mọi Router
 # ==============================================================================
 
@@ -71,15 +71,23 @@ ip -6 addr flush dev $INTERFACE scope global > /dev/null 2>&1
 nmcli connection up $INTERFACE > /dev/null 2>&1
 sleep 1
 
+count=0
 exec 3> "$WORKDATA"
 exec 4> "${WORKDIR}/boot_ifconfig.sh"
 for port in $(seq $FIRST_PORT $((FIRST_PORT + PROXY_COUNT - 1))); do
     ipv6_rand=$(gen_ipv6_64)
     echo "//$IP4/$port/$ipv6_rand" >&3
     echo "ip -6 addr add $ipv6_rand/64 dev $INTERFACE" >&4
+    
+    # Hiển thị tiến độ nhảy số
+    count=$((count + 1))
+    if (( count % 20 == 0 || count == PROXY_COUNT )); then
+        echo -ne "   [+] Tiến độ: $count / $PROXY_COUNT \r"
+    fi
 done
 exec 3>&-
 exec 4>&-
+echo -e "\n✨ Đã khởi tạo xong danh sách IP!"
 
 # 8. Chạy lệnh gán IP và cấu hình 3proxy
 chmod +x ${WORKDIR}/boot_ifconfig.sh
@@ -109,6 +117,6 @@ ulimit -n 999999
 awk -F "/" '{print $3":"$4}' ${WORKDATA} > ${WORKDIR}/proxy.txt
 
 echo "=========================================================="
-echo "✅ Xong! Proxy /64 đã sẵn sàng."
-echo "📂 List proxy: ${WORKDIR}/proxy.txt"
+echo "✅ HOÀN TẤT! Proxy đã sẵn sàng."
+echo "📂 Danh sách lưu tại: ${WORKDIR}/proxy.txt"
 echo "=========================================================="
