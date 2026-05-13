@@ -1,8 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Batch Mode + Double Progress Bar)
-# Tối ưu: Rocky Linux, gán hàng nghìn IP trong vài giây
+# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Hiển thị mỗi 1000)
 # ==============================================================================
 
 # 1. Khởi tạo card mạng
@@ -14,10 +13,10 @@ fi
 
 clear
 echo "=========================================================="
-echo "    TOOL AUTO PROXY V6 - PHIÊN BẢN SIÊU TỐC (BATCH)      "
+echo "    TOOL AUTO PROXY V6 - TIẾN ĐỘ MỖI 1000 PROXY          "
 echo "=========================================================="
 
-# 2. Nhập liệu (Lưu ý: Port nên > 1024)
+# 2. Nhập liệu
 read -p "Nhập cổng bắt đầu (VD: 10000): " INPUT_PORT < /dev/tty
 FIRST_PORT=$((10#$INPUT_PORT))
 read -p "Nhập số lượng proxy: " PROXY_COUNT < /dev/tty
@@ -53,7 +52,7 @@ IP6_RAW=$(curl -6 -s icanhazip.com)
 PREFIX=$(echo $IP6_RAW | cut -f1-4 -d':')
 
 if [ -z "$PREFIX" ]; then
-    echo "[-] LỖI: Không lấy được IPv6! Kiểm tra kết nối mạng."
+    echo "[-] LỖI: Không lấy được IPv6!"
     exit 1
 fi
 
@@ -64,7 +63,7 @@ gen_ipv6() {
     echo "$PREFIX:$(rd):$(rd):$(rd):$(rd)"
 }
 
-# 7. Bước 1: Khởi tạo danh sách & File Batch (Có tiến độ)
+# 7. Bước 1: Khởi tạo danh sách - CẬP NHẬT MỖI 1000
 echo "⏳ Bước 1: Đang chuẩn bị dữ liệu cho $PROXY_COUNT Proxy..."
 pkill 3proxy > /dev/null 2>&1
 ip -6 addr flush dev $INTERFACE scope global > /dev/null 2>&1
@@ -77,18 +76,19 @@ for port in $(seq $FIRST_PORT $((FIRST_PORT + PROXY_COUNT - 1))); do
     echo "//$IP4/$port/$ipv6_rand" >&3
     echo "addr add $ipv6_rand/64 dev $INTERFACE" >> "$BATCH_FILE"
     
-    if (( port % 100 == 0 || port == (FIRST_PORT + PROXY_COUNT - 1) )); then
-        current=$((port - FIRST_PORT + 1))
+    current=$((port - FIRST_PORT + 1))
+    # Hiển thị tiến độ mỗi khi đạt mốc 1000 hoặc khi kết thúc
+    if (( current % 1000 == 0 || current == PROXY_COUNT )); then
         echo -ne "   [+] Đang tạo danh sách: $current / $PROXY_COUNT \r"
     fi
 done
 exec 3>&-
 echo -e "\n✅ Bước 1 hoàn tất."
 
-# 8. Bước 2: Gán IP vào hệ thống (Batch mode + Progress)
+# 8. Bước 2: Gán IP vào card mạng (Batch mode) - CẬP NHẬT MỖI 1000
 echo "⏳ Bước 2: Đang gán IPv6 vào card mạng..."
-# Chia nhỏ file batch thành từng gói 500 IP để hiển thị tiến độ nhảy số
-split -l 500 "$BATCH_FILE" "${WORKDIR}/split_batch_"
+# Chia nhỏ file batch thành từng gói 1000 IP
+split -l 1000 "$BATCH_FILE" "${WORKDIR}/split_batch_"
 
 count_added=0
 for f in ${WORKDIR}/split_batch_*; do
@@ -98,7 +98,7 @@ for f in ${WORKDIR}/split_batch_*; do
     echo -ne "   [+] Tiến độ: $count_added / $PROXY_COUNT \r"
 done
 rm -f ${WORKDIR}/split_batch_*
-echo -e "\n✅ Bước 2 hoàn tất: Đã kích hoạt $count_added IPv6."
+echo -e "\n✅ Bước 2 hoàn tất."
 
 # 9. Ghi Config 3proxy
 cat <<EOF > /usr/local/etc/3proxy/3proxy.cfg
@@ -112,8 +112,7 @@ allow *
 $(awk -F "/" '{print "proxy -6 -n -a -p"$4" -i"$3" -e"$5}' ${WORKDATA})
 EOF
 
-# 10. Cấu hình tự chạy khi Reboot
-echo "⏳ Bước 3: Thiết lập khởi động cùng hệ thống..."
+# 10. Cấu hình Reboot
 chmod +x /etc/rc.d/rc.local
 echo "ip -6 addr flush dev $INTERFACE scope global" > "${WORKDIR}/boot_ifconfig.sh"
 echo "nmcli connection up $INTERFACE" >> "${WORKDIR}/boot_ifconfig.sh"
@@ -124,7 +123,7 @@ sed -i '/boot_ifconfig.sh/d' /etc/rc.d/rc.local
 echo "bash ${WORKDIR}/boot_ifconfig.sh" >> /etc/rc.d/rc.local
 echo "/usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg" >> /etc/rc.d/rc.local
 
-# 11. Khởi chạy 3proxy
+# 11. Khởi chạy
 ulimit -n 999999
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
 awk -F "/" '{print $3":"$4}' ${WORKDATA} > ${WORKDIR}/proxy.txt
