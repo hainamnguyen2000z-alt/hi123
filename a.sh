@@ -1,384 +1,135 @@
 #!/bin/bash
 
 # ==============================================================================
-# AUTO PROXY IPV6 V6 - REALTIME FULL FIX NO INTERNET
+# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Hiển thị mỗi 1000)
 # ==============================================================================
+
+# 1. Khởi tạo card mạng
+INTERFACE=$(ip route get 8.8.8.8 | awk '{print $5; exit}' 2>/dev/null)
+if [ -n "$INTERFACE" ]; then
+    nmcli connection modify "$INTERFACE" connection.autoconnect yes >/dev/null 2>&1
+    nmcli device connect "$INTERFACE" >/dev/null 2>&1
+fi
 
 clear
-
 echo "=========================================================="
-echo "      TOOL AUTO PROXY IPV6 - REALTIME FULL"
+echo "    TOOL AUTO PROXY V6 - TIẾN ĐỘ MỖI 1000 PROXY          "
 echo "=========================================================="
 
-# ==============================================================================
-# 1. DETECT NETWORK INTERFACE
-# ==============================================================================
-
-INTERFACE=$(ip route get 8.8.8.8 | awk '{print $5; exit}' 2>/dev/null)
-
-if [ -z "$INTERFACE" ]; then
-    echo "❌ Không tìm thấy card mạng!"
-    exit 1
-fi
-
-nmcli connection modify "$INTERFACE" connection.autoconnect yes >/dev/null 2>&1
-nmcli device connect "$INTERFACE" >/dev/null 2>&1
-
-# ==============================================================================
-# 2. INPUT
-# ==============================================================================
-
-echo
+# 2. Nhập liệu
 read -p "Nhập cổng bắt đầu (VD: 10000): " INPUT_PORT < /dev/tty
-
 FIRST_PORT=$((10#$INPUT_PORT))
-
 read -p "Nhập số lượng proxy: " PROXY_COUNT < /dev/tty
 
-# ==============================================================================
-# 3. CHECK NETWORK
-# ==============================================================================
-
-echo
-echo "🔍 Đang kiểm tra hệ thống..."
-sleep 1
-
-echo "📡 Interface : $INTERFACE"
-
-# ==============================================================================
-# IPv4 LAN
-# ==============================================================================
-
-LAN_IP=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1)
-
-if [ -z "$LAN_IP" ]; then
-    echo "❌ Không tìm thấy IPv4 LAN!"
-    exit 1
-fi
-
-echo "✅ IPv4 LAN     : $LAN_IP"
-
-# ==============================================================================
-# IPv4 PUBLIC
-# ==============================================================================
-
-echo
-echo "🌍 Đang kiểm tra IPv4 Public..."
-
-PUBLIC_IP=$(curl -4 -s --max-time 10 icanhazip.com)
-
-if [ -z "$PUBLIC_IP" ]; then
-    echo "❌ Không lấy được IPv4 Public!"
-    exit 1
-fi
-
-echo "✅ IPv4 Public  : $PUBLIC_IP"
-
-# ==============================================================================
-# IPv6 PUBLIC
-# ==============================================================================
-
-echo
-echo "🌐 Đang kiểm tra IPv6 Public..."
-
-IP6_RAW=$(curl -6 -s --max-time 10 icanhazip.com)
-
-if [ -z "$IP6_RAW" ]; then
-    echo "❌ Không lấy được IPv6!"
-    exit 1
-fi
-
-echo "✅ IPv6 Public  : $IP6_RAW"
-
-PREFIX=$(echo $IP6_RAW | cut -f1-4 -d':')
-
-echo "✅ IPv6 Prefix  : $PREFIX::/64"
-
-echo
-echo "🟢 Hệ thống sẵn sàng."
-sleep 1
-
-# ==============================================================================
-# 4. WORKDIR
-# ==============================================================================
-
 WORKDIR="/home/proxy-v6"
-
 WORKDATA="${WORKDIR}/data.txt"
 BATCH_FILE="${WORKDIR}/ip_batch.txt"
-
 mkdir -p $WORKDIR
 
-# ==============================================================================
-# 5. INSTALL 3PROXY
-# ==============================================================================
-
+# 3. Cài đặt môi trường & 3proxy
 if [ ! -f "/usr/local/etc/3proxy/bin/3proxy" ]; then
-
-    echo
-    echo "📦 Đang cài đặt 3proxy..."
-
-    dnf install epel-release -y >/dev/null 2>&1
-    dnf install wget curl gcc make tar net-tools -y >/dev/null 2>&1
-
+    echo "⏳ Đang cài đặt thư viện và build 3proxy..."
+    dnf install epel-release -y > /dev/null 2>&1
+    dnf install wget curl net-tools gcc make -y > /dev/null 2>&1
     cd /root || exit
-
-    echo "⬇️ Đang tải source..."
-
     wget -q https://github.com/z3APA3A/3proxy/archive/refs/tags/0.9.4.tar.gz
-
-    echo "📂 Đang giải nén..."
-
-    tar xzf 0.9.4.tar.gz
-
-    cd 3proxy-0.9.4 || exit
-
-    echo "⚙️ Đang build 3proxy..."
-
-    make -f Makefile.Linux >/dev/null 2>&1
-
+    tar xzf 0.9.4.tar.gz && cd 3proxy-0.9.4 || exit
+    make -f Makefile.Linux > /dev/null 2>&1
     mkdir -p /usr/local/etc/3proxy/{bin,logs,stat}
-
     cp bin/3proxy /usr/local/etc/3proxy/bin/
-
     chmod +x /usr/local/etc/3proxy/bin/3proxy
-
-    echo "✅ Build hoàn tất."
 fi
 
-# ==============================================================================
-# 6. SYSTEM OPTIMIZE
-# ==============================================================================
+# 4. Tối ưu hệ thống
+systemctl stop firewalld > /dev/null 2>&1
+setenforce 0 > /dev/null 2>&1
+sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1
+sysctl -w net.ipv6.conf.all.proxy_ndp=1 > /dev/null 2>&1
 
-echo
-echo "⚡ Đang tối ưu hệ thống..."
+# 5. Lấy Prefix IPv6
+IP4=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1)
+IP6_RAW=$(curl -6 -s icanhazip.com)
+PREFIX=$(echo $IP6_RAW | cut -f1-4 -d':')
 
-systemctl stop firewalld >/dev/null 2>&1
+if [ -z "$PREFIX" ]; then
+    echo "[-] LỖI: Không lấy được IPv6!"
+    exit 1
+fi
 
-setenforce 0 >/dev/null 2>&1
-
-sysctl -w net.ipv6.conf.all.forwarding=1 >/dev/null 2>&1
-sysctl -w net.ipv6.conf.all.proxy_ndp=1 >/dev/null 2>&1
-
-ulimit -n 999999
-
-echo "✅ Tối ưu hoàn tất."
-
-# ==============================================================================
-# 7. GENERATE IPV6 FUNCTION
-# ==============================================================================
-
+# 6. Hàm tạo IP ngẫu nhiên
 array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
-
 gen_ipv6() {
-
-    rd() {
-        echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"
-    }
-
+    rd() { echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"; }
     echo "$PREFIX:$(rd):$(rd):$(rd):$(rd)"
 }
 
-# ==============================================================================
-# 8. STOP OLD PROXY
-# ==============================================================================
+# 7. Bước 1: Khởi tạo danh sách - CẬP NHẬT MỖI 1000
+echo "⏳ Bước 1: Đang chuẩn bị dữ liệu cho $PROXY_COUNT Proxy..."
+pkill 3proxy > /dev/null 2>&1
+ip -6 addr flush dev $INTERFACE scope global > /dev/null 2>&1
+nmcli connection up $INTERFACE > /dev/null 2>&1
 
-echo
-echo "🛑 Đang dừng proxy cũ..."
-
-pkill 3proxy >/dev/null 2>&1
-
-echo "✅ Đã dừng proxy cũ."
-
-# ==============================================================================
-# 9. DELETE OLD IPV6 REALTIME
-# ==============================================================================
-
-echo
-echo "🧹 Đang xóa IPv6 cũ..."
-
-OLD_IPS=$(ip -6 addr show dev $INTERFACE scope global | grep inet6 | awk '{print $2}')
-
-DELETE_COUNT=0
-
-for ip in $OLD_IPS; do
-
-    ip -6 addr del $ip dev $INTERFACE >/dev/null 2>&1
-
-    DELETE_COUNT=$((DELETE_COUNT + 1))
-
-    echo -ne "\r🗑️ Đã xóa IPv6: $DELETE_COUNT"
-done
-
-echo
-echo "✅ Xóa IPv6 hoàn tất."
-
-# ==============================================================================
-# 10. CREATE PROXY DATA REALTIME
-# ==============================================================================
-
-echo
-echo "⚙️ Đang tạo danh sách proxy..."
-
-> "$WORKDATA"
-> "$BATCH_FILE"
-
-COUNT=0
-
-END_PORT=$((FIRST_PORT + PROXY_COUNT - 1))
-
-for port in $(seq $FIRST_PORT $END_PORT); do
-
+echo -n "" > "$BATCH_FILE"
+exec 3> "$WORKDATA"
+for port in $(seq $FIRST_PORT $((FIRST_PORT + PROXY_COUNT - 1))); do
     ipv6_rand=$(gen_ipv6)
-
-    # IMPORTANT FIX
-    echo "//$PUBLIC_IP/$port/$ipv6_rand" >> "$WORKDATA"
-
+    echo "//$IP4/$port/$ipv6_rand" >&3
     echo "addr add $ipv6_rand/64 dev $INTERFACE" >> "$BATCH_FILE"
-
-    COUNT=$((COUNT + 1))
-
-    echo -ne "\r📦 Đã tạo proxy: $COUNT / $PROXY_COUNT"
+    
+    current=$((port - FIRST_PORT + 1))
+    # Hiển thị tiến độ mỗi khi đạt mốc 1000 hoặc khi kết thúc
+    if (( current % 1000 == 0 || current == PROXY_COUNT )); then
+        echo -ne "   [+] Đang tạo danh sách: $current / $PROXY_COUNT \r"
+    fi
 done
+exec 3>&-
+echo -e "\n✅ Bước 1 hoàn tất."
 
-echo
-echo "✅ Tạo danh sách proxy hoàn tất."
+# 8. Bước 2: Gán IP vào card mạng (Batch mode) - CẬP NHẬT MỖI 1000
+echo "⏳ Bước 2: Đang gán IPv6 vào card mạng..."
+# Chia nhỏ file batch thành từng gói 1000 IP
+split -l 1000 "$BATCH_FILE" "${WORKDIR}/split_batch_"
 
-# ==============================================================================
-# 11. LOAD IPV6 REALTIME
-# ==============================================================================
+count_added=0
+for f in ${WORKDIR}/split_batch_*; do
+    ip -6 -batch "$f" > /dev/null 2>&1
+    lines=$(wc -l < "$f")
+    count_added=$((count_added + lines))
+    echo -ne "   [+] Tiến độ: $count_added / $PROXY_COUNT \r"
+done
+rm -f ${WORKDIR}/split_batch_*
+echo -e "\n✅ Bước 2 hoàn tất."
 
-echo
-echo "🚀 Đang nạp IPv6 vào card mạng..."
-
-LOAD_COUNT=0
-
-while read line; do
-
-    ip -6 $line >/dev/null 2>&1
-
-    LOAD_COUNT=$((LOAD_COUNT + 1))
-
-    echo -ne "\r🌐 Đã nạp IPv6: $LOAD_COUNT / $PROXY_COUNT"
-
-done < "$BATCH_FILE"
-
-echo
-echo "✅ Nạp IPv6 hoàn tất."
-
-# ==============================================================================
-# 12. CREATE 3PROXY CONFIG
-# ==============================================================================
-
-echo
-echo "🛠️ Đang tạo config 3proxy..."
-
+# 9. Ghi Config 3proxy
 cat <<EOF > /usr/local/etc/3proxy/3proxy.cfg
 daemon
-maxconn 50000
-
-nserver 1.1.1.1
+maxconn 20000
 nserver 8.8.8.8
-
+nserver 1.1.1.1
 nscache 65536
-
-timeouts 1 5 30 60 180 1800 15 60
-
-setgid 65535
-setuid 65535
-
-stacksize 6291456
-
-flush
-
 auth none
 allow *
-
 $(awk -F "/" '{print "proxy -6 -n -a -p"$4" -i"$3" -e"$5}' ${WORKDATA})
 EOF
 
-echo "✅ Config hoàn tất."
-
-# ==============================================================================
-# 13. REBOOT CONFIG
-# ==============================================================================
-
-echo
-echo "♻️ Đang cấu hình tự khởi động..."
-
+# 10. Cấu hình Reboot
 chmod +x /etc/rc.d/rc.local
+echo "ip -6 addr flush dev $INTERFACE scope global" > "${WORKDIR}/boot_ifconfig.sh"
+echo "nmcli connection up $INTERFACE" >> "${WORKDIR}/boot_ifconfig.sh"
+echo "ip -6 -batch $BATCH_FILE" >> "${WORKDIR}/boot_ifconfig.sh"
 
-cat <<EOF > ${WORKDIR}/boot_ifconfig.sh
-#!/bin/bash
-
-ip -6 addr flush dev $INTERFACE scope global
-
-while read line; do
-    ip -6 \$line >/dev/null 2>&1
-done < $BATCH_FILE
-
-/usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
-EOF
-
-chmod +x ${WORKDIR}/boot_ifconfig.sh
-
+sed -i '/3proxy/d' /etc/rc.d/rc.local
 sed -i '/boot_ifconfig.sh/d' /etc/rc.d/rc.local
-
 echo "bash ${WORKDIR}/boot_ifconfig.sh" >> /etc/rc.d/rc.local
+echo "/usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg" >> /etc/rc.d/rc.local
 
-echo "✅ Auto boot hoàn tất."
-
-# ==============================================================================
-# 14. START PROXY
-# ==============================================================================
-
-echo
-echo "🚀 Đang khởi chạy 3proxy..."
-
+# 11. Khởi chạy
+ulimit -n 999999
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
-
-sleep 2
-
-# ==============================================================================
-# 15. EXPORT PROXY
-# ==============================================================================
-
 awk -F "/" '{print $3":"$4}' ${WORKDATA} > ${WORKDIR}/proxy.txt
 
-# ==============================================================================
-# 16. CHECK STATUS
-# ==============================================================================
-
-RUNNING=$(pgrep 3proxy | wc -l)
-
-echo
-
-if [ "$RUNNING" -gt 0 ]; then
-    STATUS="RUNNING"
-else
-    STATUS="STOPPED"
-fi
-
-# ==============================================================================
-# DONE
-# ==============================================================================
-
 echo "=========================================================="
-echo "✅ HOÀN TẤT"
-echo "=========================================================="
-
-echo "📡 Interface      : $INTERFACE"
-echo "🏠 IPv4 LAN       : $LAN_IP"
-echo "🌍 IPv4 Public    : $PUBLIC_IP"
-echo "🌐 IPv6 Public    : $IP6_RAW"
-echo "🧩 IPv6 Prefix    : $PREFIX::/64"
-
-echo
-echo "🚀 Proxy Status   : $STATUS"
-echo "📦 Total Proxy    : $PROXY_COUNT"
-echo "🔢 Port Range     : $FIRST_PORT -> $END_PORT"
-
-echo
-echo "📂 Proxy File     : ${WORKDIR}/proxy.txt"
-
+echo "✅ HOÀN TẤT!"
+echo "🌐 Trạng thái: $PROXY_COUNT Proxy đang chạy."
+echo "📂 Danh sách: ${WORKDIR}/proxy.txt"
 echo "=========================================================="
