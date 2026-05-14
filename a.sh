@@ -1,17 +1,17 @@
 #!/bin/bash
 
 # ==============================================================================
-# AUTO PROXY IPV6 V6 - REALTIME FULL
+# AUTO PROXY IPV6 V6 - REALTIME FULL FIX NO INTERNET
 # ==============================================================================
 
 clear
 
 echo "=========================================================="
-echo "        TOOL AUTO PROXY V6 - REALTIME MODE"
+echo "      TOOL AUTO PROXY IPV6 - REALTIME FULL"
 echo "=========================================================="
 
 # ==============================================================================
-# 1. Detect Interface
+# 1. DETECT NETWORK INTERFACE
 # ==============================================================================
 
 INTERFACE=$(ip route get 8.8.8.8 | awk '{print $5; exit}' 2>/dev/null)
@@ -30,6 +30,7 @@ nmcli device connect "$INTERFACE" >/dev/null 2>&1
 
 echo
 read -p "Nhập cổng bắt đầu (VD: 10000): " INPUT_PORT < /dev/tty
+
 FIRST_PORT=$((10#$INPUT_PORT))
 
 read -p "Nhập số lượng proxy: " PROXY_COUNT < /dev/tty
@@ -44,35 +45,57 @@ sleep 1
 
 echo "📡 Interface : $INTERFACE"
 
+# ==============================================================================
 # IPv4 LAN
+# ==============================================================================
+
 LAN_IP=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1)
 
 if [ -z "$LAN_IP" ]; then
-    echo "❌ Không tìm thấy IPv4 LAN"
+    echo "❌ Không tìm thấy IPv4 LAN!"
     exit 1
 fi
 
-echo "✅ IPv4 LAN  : $LAN_IP"
+echo "✅ IPv4 LAN     : $LAN_IP"
 
-# IPv6 WAN
+# ==============================================================================
+# IPv4 PUBLIC
+# ==============================================================================
+
 echo
-echo "🌐 Đang kiểm tra IPv6 public..."
+echo "🌍 Đang kiểm tra IPv4 Public..."
+
+PUBLIC_IP=$(curl -4 -s --max-time 10 icanhazip.com)
+
+if [ -z "$PUBLIC_IP" ]; then
+    echo "❌ Không lấy được IPv4 Public!"
+    exit 1
+fi
+
+echo "✅ IPv4 Public  : $PUBLIC_IP"
+
+# ==============================================================================
+# IPv6 PUBLIC
+# ==============================================================================
+
+echo
+echo "🌐 Đang kiểm tra IPv6 Public..."
 
 IP6_RAW=$(curl -6 -s --max-time 10 icanhazip.com)
 
 if [ -z "$IP6_RAW" ]; then
-    echo "❌ IPv6 lỗi hoặc chưa cấu hình!"
+    echo "❌ Không lấy được IPv6!"
     exit 1
 fi
 
-echo "✅ IPv6 WAN  : $IP6_RAW"
+echo "✅ IPv6 Public  : $IP6_RAW"
 
 PREFIX=$(echo $IP6_RAW | cut -f1-4 -d':')
 
-echo "✅ Prefix /64: $PREFIX::/64"
+echo "✅ IPv6 Prefix  : $PREFIX::/64"
 
 echo
-echo "🟢 Hệ thống sẵn sàng..."
+echo "🟢 Hệ thống sẵn sàng."
 sleep 1
 
 # ==============================================================================
@@ -96,21 +119,21 @@ if [ ! -f "/usr/local/etc/3proxy/bin/3proxy" ]; then
     echo "📦 Đang cài đặt 3proxy..."
 
     dnf install epel-release -y >/dev/null 2>&1
-    dnf install wget curl gcc make net-tools -y >/dev/null 2>&1
+    dnf install wget curl gcc make tar net-tools -y >/dev/null 2>&1
 
     cd /root || exit
 
-    echo "⬇️ Download source..."
+    echo "⬇️ Đang tải source..."
 
     wget -q https://github.com/z3APA3A/3proxy/archive/refs/tags/0.9.4.tar.gz
 
-    echo "📂 Giải nén..."
+    echo "📂 Đang giải nén..."
 
     tar xzf 0.9.4.tar.gz
 
     cd 3proxy-0.9.4 || exit
 
-    echo "⚙️ Build 3proxy..."
+    echo "⚙️ Đang build 3proxy..."
 
     make -f Makefile.Linux >/dev/null 2>&1
 
@@ -128,7 +151,7 @@ fi
 # ==============================================================================
 
 echo
-echo "⚡ Tối ưu hệ thống..."
+echo "⚡ Đang tối ưu hệ thống..."
 
 systemctl stop firewalld >/dev/null 2>&1
 
@@ -139,8 +162,10 @@ sysctl -w net.ipv6.conf.all.proxy_ndp=1 >/dev/null 2>&1
 
 ulimit -n 999999
 
+echo "✅ Tối ưu hoàn tất."
+
 # ==============================================================================
-# 7. GENERATE IPV6
+# 7. GENERATE IPV6 FUNCTION
 # ==============================================================================
 
 array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
@@ -206,7 +231,8 @@ for port in $(seq $FIRST_PORT $END_PORT); do
 
     ipv6_rand=$(gen_ipv6)
 
-    echo "//$LAN_IP/$port/$ipv6_rand" >> "$WORKDATA"
+    # IMPORTANT FIX
+    echo "//$PUBLIC_IP/$port/$ipv6_rand" >> "$WORKDATA"
 
     echo "addr add $ipv6_rand/64 dev $INTERFACE" >> "$BATCH_FILE"
 
@@ -216,7 +242,7 @@ for port in $(seq $FIRST_PORT $END_PORT); do
 done
 
 echo
-echo "✅ Tạo proxy hoàn tất."
+echo "✅ Tạo danh sách proxy hoàn tất."
 
 # ==============================================================================
 # 11. LOAD IPV6 REALTIME
@@ -250,13 +276,19 @@ echo "🛠️ Đang tạo config 3proxy..."
 cat <<EOF > /usr/local/etc/3proxy/3proxy.cfg
 daemon
 maxconn 50000
-nserver 8.8.8.8
+
 nserver 1.1.1.1
+nserver 8.8.8.8
+
 nscache 65536
+
 timeouts 1 5 30 60 180 1800 15 60
+
 setgid 65535
 setuid 65535
+
 stacksize 6291456
+
 flush
 
 auth none
@@ -314,7 +346,7 @@ sleep 2
 awk -F "/" '{print $3":"$4}' ${WORKDATA} > ${WORKDIR}/proxy.txt
 
 # ==============================================================================
-# 16. CHECK RUNNING
+# 16. CHECK STATUS
 # ==============================================================================
 
 RUNNING=$(pgrep 3proxy | wc -l)
@@ -335,17 +367,18 @@ echo "=========================================================="
 echo "✅ HOÀN TẤT"
 echo "=========================================================="
 
-echo "📡 Interface     : $INTERFACE"
-echo "🌐 IPv4 LAN      : $LAN_IP"
-echo "🌍 IPv6 WAN      : $IP6_RAW"
-echo "🧩 IPv6 Prefix   : $PREFIX::/64"
+echo "📡 Interface      : $INTERFACE"
+echo "🏠 IPv4 LAN       : $LAN_IP"
+echo "🌍 IPv4 Public    : $PUBLIC_IP"
+echo "🌐 IPv6 Public    : $IP6_RAW"
+echo "🧩 IPv6 Prefix    : $PREFIX::/64"
 
 echo
-echo "🚀 Proxy Status  : $STATUS"
-echo "📦 Total Proxy   : $PROXY_COUNT"
-echo "🔢 Port Range    : $FIRST_PORT -> $END_PORT"
+echo "🚀 Proxy Status   : $STATUS"
+echo "📦 Total Proxy    : $PROXY_COUNT"
+echo "🔢 Port Range     : $FIRST_PORT -> $END_PORT"
 
 echo
-echo "📂 Proxy File    : ${WORKDIR}/proxy.txt"
+echo "📂 Proxy File     : ${WORKDIR}/proxy.txt"
 
 echo "=========================================================="
