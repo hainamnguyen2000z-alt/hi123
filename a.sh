@@ -1,62 +1,31 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Sửa Lỗi No Internet Khi Cắm Proxy)
-# Tối ưu: Tăng sleep chờ Gateway mạng quốc tế, tối ưu bảng Neighbor cho 12 phone
+# Script: Auto Proxy IPv6 /64 Standard (Bản có Tiến độ Real-time)
 # ==============================================================================
+
+# 1. Khởi tạo card mạng
+INTERFACE=$(ip route get 8.8.8.8 | awk '{print $5; exit}' 2>/dev/null)
+if [ -n "$INTERFACE" ]; then
+    nmcli connection modify "$INTERFACE" connection.autoconnect yes >/dev/null 2>&1
+    nmcli device connect "$INTERFACE" >/dev/null 2>&1
+fi
 
 clear
 echo "=========================================================="
-echo "    TOOL AUTO PROXY V6 - KIỂM TRA HỆ THỐNG TRƯỚC          "
+echo "   TOOL AUTO PROXY V6 - REAL-TIME PROGRESS               "
 echo "=========================================================="
 
-# 1. Xác định Interface mạng
-INTERFACE=$(ip route get 8.8.8.8 | awk '{print $5; exit}' 2>/dev/null)
-if [ -z "$INTERFACE" ]; then
-    INTERFACE="ens160"
-fi
-
-# 2. Thu thập dữ liệu mạng
-IP4=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1 2>/dev/null)
-if [ -z "$IP4" ]; then
-    IP4="192.168.1.5"
-fi
-
-# Lấy IP6 global đang chạy trên máy để bóc ra Prefix /64
-IP6_LOCAL=$(ip -6 addr show $INTERFACE | grep 'scope global' | grep -v 'temporary' | awk '{print $2}' | head -n 1 | cut -d/ -f1 2>/dev/null)
-PREFIX=$(echo $IP6_LOCAL | cut -f1-4 -d':')
-
-# 3. Hiển thị thông số
-echo -e "📱 Card mạng đang dùng : \e[32m$INTERFACE\e[0m"
-echo -e "🌐 IPv4 của máy        : \e[32m$IP4\e[0m"
-
-if [ -n "$PREFIX" ] && [ ${#PREFIX} -gt 10 ]; then
-    echo -e "✅ Tình trạng IPv6     : \e[32mThông mạng\e[0m"
-    echo -e "🛰️  Dải IPv6 Tự Động   : \e[36m$PREFIX::/64\e[0m"
-else
-    echo -e "⚠️  Tình trạng IPv6     : \e[33mKhông lấy được tự động (Mạng lag)\e[0m"
-    PREFIX="2405:4802:935:310"
-    echo -e "🛰️  Dải IPv6 Dự Phòng  : \e[35m$PREFIX::/64\e[0m"
-fi
-echo "=========================================================="
-
-# 4. Nhập liệu
-read -p "👉 Nhập cổng bắt đầu (VD: 10000): " INPUT_PORT < /dev/tty
+# 2. Nhập liệu
+read -p "Nhập cổng bắt đầu (VD: 10000): " INPUT_PORT < /dev/tty
 FIRST_PORT=$((10#$INPUT_PORT))
-read -p "👉 Nhập số lượng proxy muốn tạo: " PROXY_COUNT < /dev/tty
-
-# Xác nhận lại dải IP
-read -p "🛰️  Xác nhận dải IPv6 Prefix (Ấn Enter để giữ nguyên $PREFIX): " NEW_PREFIX < /dev/tty
-if [ -n "$NEW_PREFIX" ]; then
-    PREFIX=$NEW_PREFIX
-fi
+read -p "Nhập số lượng proxy: " PROXY_COUNT < /dev/tty
 
 WORKDIR="/home/proxy-v6"
 WORKDATA="${WORKDIR}/data.txt"
-BATCH_FILE="${WORKDIR}/ip_batch.txt"
 mkdir -p $WORKDIR
 
-# 5. Cài đặt môi trường & 3proxy
+# 3. Cài đặt môi trường & 3proxy
 if [ ! -f "/usr/local/etc/3proxy/bin/3proxy" ]; then
     echo "⏳ Đang cài đặt thư viện và build 3proxy..."
     dnf install epel-release -y > /dev/null 2>&1
@@ -70,68 +39,62 @@ if [ ! -f "/usr/local/etc/3proxy/bin/3proxy" ]; then
     chmod +x /usr/local/etc/3proxy/bin/3proxy
 fi
 
-# 6. Tối ưu hệ thống (Fix lỗi chập chờn cho phone)
+# 4. Dọn dẹp hệ thống & Firewall
 systemctl stop firewalld > /dev/null 2>&1
 setenforce 0 > /dev/null 2>&1
 sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1
-sysctl -w net.ipv6.conf.all.proxy_ndp=1 > /dev/null 2>&1
 
-# Nới rộng bảng Neighbor chống nghẽn mạng IPv6 khi chạy nhiều máy cùng lúc
-sysctl -w net.ipv6.neigh.default.gc_thresh1=2048 > /dev/null 2>&1
-sysctl -w net.ipv6.neigh.default.gc_thresh2=4096 > /dev/null 2>&1
-sysctl -w net.ipv6.neigh.default.gc_thresh3=8192 > /dev/null 2>&1
-ethtool -G $INTERFACE rx 4096 tx 4096 >/dev/null 2>&1
+# 5. Lấy Prefix /64 chuẩn từ card mạng
+IP4=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1)
+IP6_RAW=$(curl -6 -s icanhazip.com)
+PREFIX=$(echo $IP6_RAW | cut -f1-4 -d':')
 
-# Hàm tạo IP ngẫu nhiên dải /64
+if [ -z "$PREFIX" ]; then
+    echo "[-] LỖI: Không lấy được IPv6. Kiểm tra lại mạng máy ảo!"
+    exit 1
+fi
+
+echo "=> IPv6 Detect: $PREFIX::/64"
+
+# 6. Hàm tạo IP ngẫu nhiên trong dải /64
 array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
-gen_ipv6() {
+gen_ipv6_64() {
     rd() { echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"; }
     echo "$PREFIX:$(rd):$(rd):$(rd):$(rd)"
 }
 
-# 7. Bước 1: Khởi tạo danh sách - CẬP NHẬT MỖI 1000
-echo "⏳ Bước 1: Đang chuẩn bị dữ liệu cho $PROXY_COUNT Proxy..."
+# 7. Tạo danh sách cấu hình
+echo "⏳ Bước 1: Đang khởi tạo danh sách cấu hình..."
 pkill 3proxy > /dev/null 2>&1
-
-# QUAN TRỌNG: Làm sạch và ép card mạng nhận lại Default Gateway đầy đủ
 ip -6 addr flush dev $INTERFACE scope global > /dev/null 2>&1
 nmcli connection up $INTERFACE > /dev/null 2>&1
-echo "⏳ Đang đợi cấu hình định tuyến từ MikroTik (Nghỉ 5 giây)..."
-sleep 5 # Tăng từ 1s lên 5s để chấp cả mạng đi quốc tế ping 208ms
+sleep 1
 
-echo -n "" > "$BATCH_FILE"
 exec 3> "$WORKDATA"
 for port in $(seq $FIRST_PORT $((FIRST_PORT + PROXY_COUNT - 1))); do
-    ipv6_rand=$(gen_ipv6)
+    ipv6_rand=$(gen_ipv6_64)
     echo "//$IP4/$port/$ipv6_rand" >&3
-    echo "addr add $ipv6_rand/64 dev $INTERFACE" >> "$BATCH_FILE"
-    
-    current=$((port - FIRST_PORT + 1))
-    if (( current % 1000 == 0 || current == PROXY_COUNT )); then
-        echo -ne "   [+] Đang tạo danh sách: $current / $PROXY_COUNT \r"
-    fi
 done
 exec 3>&-
-echo -e "\n✅ Bước 1 hoàn tất."
 
-# 8. Bước 2: Gán IP vào card mạng (Batch mode) - CẬP NHẬT MỖI 1000
-echo "⏳ Bước 2: Đang gán IPv6 vào card mạng..."
-split -l 1000 "$BATCH_FILE" "${WORKDIR}/split_batch_"
-
-count_added=0
-for f in ${WORKDIR}/split_batch_*; do
-    ip -6 -batch "$f" > /dev/null 2>&1
-    lines=$(wc -l < "$f")
-    count_added=$((count_added + lines))
-    echo -ne "   [+] Tiến độ: $count_added / $PROXY_COUNT \r"
+# 8. Nạp IP vào card mạng với thanh TIẾN ĐỘ REAL-TIME
+echo "⏳ Bước 2: Đang nạp IP vào card mạng (Vui lòng đợi)..."
+count=0
+for ipv6 in $(awk -F "/" '{print $5}' "$WORKDATA"); do
+    ip -6 addr add "$ipv6/64" dev "$INTERFACE"
+    count=$((count + 1))
+    
+    # Hiển thị nhảy số Real-time tại đây
+    if (( count % 10 == 0 || count == PROXY_COUNT )); then
+        echo -ne "   [+] Đang nạp: $count / $PROXY_COUNT \r"
+    fi
 done
-rm -f ${WORKDIR}/split_batch_*
-echo -e "\n✅ Bước 2 hoàn tất."
+echo -e "\n✅ Đã nạp xong $count IP vào hệ thống."
 
-# 9. Ghi Config 3proxy (Hạ maxconn xuống 1024 để tránh nghẽn RAM 2GB)
+# 9. Ghi Config 3proxy
 cat <<EOF > /usr/local/etc/3proxy/3proxy.cfg
 daemon
-maxconn 1024
+maxconn 10000
 nserver 8.8.8.8
 nserver 1.1.1.1
 nscache 65536
@@ -140,29 +103,21 @@ allow *
 $(awk -F "/" '{print "proxy -6 -n -a -p"$4" -i"$3" -e"$5}' ${WORKDATA})
 EOF
 
-# 10. Cấu hình Khởi động cùng hệ thống
+# 10. Tự động chạy khi reboot
 chmod +x /etc/rc.d/rc.local
-{
-    echo "ip -6 addr flush dev $INTERFACE scope global"
-    echo "nmcli connection up $INTERFACE"
-    echo "sleep 5"
-    echo "ethtool -G $INTERFACE rx 4096 tx 4096"
-    echo "sysctl -w net.ipv6.neigh.default.gc_thresh3=8192"
-    echo "ip -6 -batch $BATCH_FILE"
-} > "${WORKDIR}/boot_ifconfig.sh"
-
 sed -i '/3proxy/d' /etc/rc.d/rc.local
-sed -i '/boot_ifconfig.sh/d' /etc/rc.d/rc.local
+# Tạo file boot đơn giản để nạp IP khi khởi động lại
+echo "ip -6 addr flush dev $INTERFACE scope global" > "${WORKDIR}/boot_ifconfig.sh"
+awk -F "/" '{print "ip -6 addr add "$5"/64 dev '$INTERFACE'"}' "$WORKDATA" >> "${WORKDIR}/boot_ifconfig.sh"
 echo "bash ${WORKDIR}/boot_ifconfig.sh" >> /etc/rc.d/rc.local
 echo "/usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg" >> /etc/rc.d/rc.local
 
-# 11. Khởi chạy hệ thống proxy
+# Khởi chạy 3proxy
 ulimit -n 999999
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
 awk -F "/" '{print $3":"$4}' ${WORKDATA} > ${WORKDIR}/proxy.txt
 
 echo "=========================================================="
-echo "✅ HOÀN TẤT THÀNH CÔNG!"
-echo "🌐 Trạng thái: $PROXY_COUNT Proxy đang chạy."
-echo "📂 Tải list proxy tại: ${WORKDIR}/proxy.txt"
+echo "✅ HOÀN TẤT! Proxy đã sẵn sàng."
+echo "📂 List proxy: ${WORKDIR}/proxy.txt"
 echo "=========================================================="
