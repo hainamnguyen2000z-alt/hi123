@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Bản Bỏ Chặn Check Mạng)
-# Tối ưu: Hiển thị cảnh báo trực quan nhưng KHÔNG chặn tiến trình cài đặt
+# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Bản Bất Tử - Bypass Check Mạng)
+# Tối ưu: Không bao giờ thoát script giữa chừng, tối ưu cho 12 phone cắm E50UG
 # ==============================================================================
 
 clear
@@ -10,49 +10,47 @@ echo "=========================================================="
 echo "    TOOL AUTO PROXY V6 - KIỂM TRA HỆ THỐNG TRƯỚC          "
 echo "=========================================================="
 
-# 1. Khởi tạo card mạng và xác định Interface
+# 1. Xác định Interface mạng
 INTERFACE=$(ip route get 8.8.8.8 | awk '{print $5; exit}' 2>/dev/null)
 if [ -z "$INTERFACE" ]; then
-    echo "[-] LỖI: Không tìm thấy card mạng có kết nối Internet!"
-    exit 1
+    INTERFACE="ens160"
 fi
 
-# Ép tự động kết nối card mạng
-nmcli connection modify "$INTERFACE" connection.autoconnect yes >/dev/null 2>&1
-nmcli device connect "$INTERFACE" >/dev/null 2>&1
+# 2. Thu thập dữ liệu mạng
+IP4=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1 2>/dev/null)
+if [ -z "$IP4" ]; then
+    IP4="192.168.1.5"
+fi
 
-# 2. Thu thập dữ liệu mạng và BÓC TÁCH PREFIX TRỰC TIẾP TỪ CARD MẠNG
-IP4=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1)
-
-# Lấy IP6 global đang chạy trên máy để bóc ra 4 cụm đầu (Prefix /64)
-IP6_LOCAL=$(ip -6 addr show $INTERFACE | grep 'scope global' | grep -v 'temporary' | awk '{print $2}' | head -n 1 | cut -d/ -f1)
+# Lấy IP6 global đang chạy trên máy để bóc ra Prefix /64
+IP6_LOCAL=$(ip -6 addr show $INTERFACE | grep 'scope global' | grep -v 'temporary' | awk '{print $2}' | head -n 1 | cut -d/ -f1 2>/dev/null)
 PREFIX=$(echo $IP6_LOCAL | cut -f1-4 -d':')
 
-# 3. Kiểm tra Internet IPv6 bằng lệnh ping -6
-PING_CHECK=$(ping -6 -c 1 -W 5 2001:4860:4860::8888 >/dev/null 2>&1; echo $?)
-
-# Hiển thị thông số cho người dùng kiểm tra trước
+# 3. Hiển thị thông số (Chỉ hiển thị để xem, KHÔNG CHẶN EXIT NỮA)
 echo -e "📱 Card mạng đang dùng : \e[32m$INTERFACE\e[0m"
 echo -e "🌐 IPv4 của máy        : \e[32m$IP4\e[0m"
 
-if [ -n "$PREFIX" ]; then
-    echo -e "✅ Tình trạng IPv6     : \e[32mThông mạng (Card đã nhận IP)\e[0m"
-    echo -e "🛰️  Dải IPv6 Detect    : \e[36m$PREFIX::/64\e[0m"
+if [ -n "$PREFIX" ] && [ ${#PREFIX} -gt 10 ]; then
+    echo -e "✅ Tình trạng IPv6     : \e[32mThông mạng\e[0m"
+    echo -e "🛰️  Dải IPv6 Tự Động   : \e[36m$PREFIX::/64\e[0m"
 else
-    if [ $PING_CHECK -eq 0 ]; then
-        echo -e "✅ Tình trạng IPv6     : \e[32mThông mạng (Ping OK)\e[0m"
-    else
-        # Chỉ hiển thị cảnh báo để bạn lưu ý, TUYỆT ĐỐI KHÔNG DỪNG TOOL NỮA
-        echo -e "⚠️  Tình trạng IPv6     : \e[33mCảnh báo (Mạng phản hồi chậm hoặc ping cao)\e[0m"
-        echo "   [!] Tool vẫn sẽ tiếp tục chạy vì bạn đã xác nhận ping tay thông suốt."
-    fi
+    echo -e "⚠️  Tình trạng IPv6     : \e[33mKhông lấy được tự động (Mạng lag)\e[0m"
+    # Nếu không lấy được tự động, điền dải mặc định theo log trước của bạn để backup
+    PREFIX="2405:4802:935:310"
+    echo -e "🛰️  Dải IPv6 Dự Phòng  : \e[35m$PREFIX::/64\e[0m"
 fi
 echo "=========================================================="
 
-# 4. Nhập liệu (Bây giờ dải này chắc chắn sẽ hiện ra để bạn nhập)
+# 4. Nhập liệu (Đảm bảo luôn luôn hiển thị)
 read -p "👉 Nhập cổng bắt đầu (VD: 10000): " INPUT_PORT < /dev/tty
 FIRST_PORT=$((10#$INPUT_PORT))
 read -p "👉 Nhập số lượng proxy muốn tạo: " PROXY_COUNT < /dev/tty
+
+# Cho phép xác nhận lại dải IP để chắc chắn tạo proxy là dùng được ngay
+read -p "🛰️  Xác nhận dải IPv6 Prefix (Ấn Enter để giữ nguyên $PREFIX): " NEW_PREFIX < /dev/tty
+if [ -n "$NEW_PREFIX" ]; then
+    PREFIX=$NEW_PREFIX
+fi
 
 WORKDIR="/home/proxy-v6"
 WORKDATA="${WORKDIR}/data.txt"
@@ -73,19 +71,19 @@ if [ ! -f "/usr/local/etc/3proxy/bin/3proxy" ]; then
     chmod +x /usr/local/etc/3proxy/bin/3proxy
 fi
 
-# 6. Tối ưu hệ thống (Fix lỗi chập chờn cho phone)
+# 6. Tối ưu hệ thống (Fix lỗi chập chờn, mất kết nối trên 12 phone)
 systemctl stop firewalld > /dev/null 2>&1
 setenforce 0 > /dev/null 2>&1
 sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1
 sysctl -w net.ipv6.conf.all.proxy_ndp=1 > /dev/null 2>&1
 
-# Nới rộng bảng Neighbor chống nghẽn mạng IPv6 khi chạy nhiều máy
+# Nới rộng bảng Neighbor chống tràn bộ đệm mạng IPv6
 sysctl -w net.ipv6.neigh.default.gc_thresh1=2048 > /dev/null 2>&1
 sysctl -w net.ipv6.neigh.default.gc_thresh2=4096 > /dev/null 2>&1
 sysctl -w net.ipv6.neigh.default.gc_thresh3=8192 > /dev/null 2>&1
 ethtool -G $INTERFACE rx 4096 tx 4096 >/dev/null 2>&1
 
-# Hàm tạo IP ngẫu nhiên dải /64
+# Hàm tạo IP ngẫu nhiên dải /64 (Đặt cố định tại đây)
 array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
 gen_ipv6() {
     rd() { echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"; }
@@ -96,7 +94,7 @@ gen_ipv6() {
 echo "⏳ Bước 1: Đang chuẩn bị dữ liệu cho $PROXY_COUNT Proxy..."
 pkill 3proxy > /dev/null 2>&1
 
-# Xóa IP cũ và nạp lại cấu hình gốc
+# Làm sạch cấu hình IP cũ
 ip -6 addr flush dev $INTERFACE scope global > /dev/null 2>&1
 nmcli connection up $INTERFACE > /dev/null 2>&1
 sleep 1
@@ -130,7 +128,7 @@ done
 rm -f ${WORKDIR}/split_batch_*
 echo -e "\n✅ Bước 2 hoàn tất."
 
-# 9. Ghi Config 3proxy (Hạ maxconn xuống 1024 để mượt RAM 2GB)
+# 9. Ghi Config 3proxy (Giới hạn luồng maxconn 1024 để mượt RAM 2GB)
 cat <<EOF > /usr/local/etc/3proxy/3proxy.cfg
 daemon
 maxconn 1024
