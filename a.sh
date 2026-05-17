@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Bản Sửa Lỗi Cú Pháp)
-# Tối ưu: Bóc tách Prefix trực tiếp, tăng timeout ping mạng lag, tối ưu Neighbor
+# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Bản Bỏ Chặn Check Mạng)
+# Tối ưu: Hiển thị cảnh báo trực quan nhưng KHÔNG chặn tiến trình cài đặt
 # ==============================================================================
 
 clear
@@ -28,27 +28,28 @@ IP4=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1)
 IP6_LOCAL=$(ip -6 addr show $INTERFACE | grep 'scope global' | grep -v 'temporary' | awk '{print $2}' | head -n 1 | cut -d/ -f1)
 PREFIX=$(echo $IP6_LOCAL | cut -f1-4 -d':')
 
-# 3. Kiểm tra Internet IPv6 bằng lệnh ping -6 (Chờ tối đa 5 giây đề phòng mạng đi quốc tế ping cao)
+# 3. Kiểm tra Internet IPv6 bằng lệnh ping -6
 PING_CHECK=$(ping -6 -c 1 -W 5 2001:4860:4860::8888 >/dev/null 2>&1; echo $?)
 
 # Hiển thị thông số cho người dùng kiểm tra trước
 echo -e "📱 Card mạng đang dùng : \e[32m$INTERFACE\e[0m"
 echo -e "🌐 IPv4 của máy        : \e[32m$IP4\e[0m"
 
-# Nếu card mạng đã có sẵn IP6 (PREFIX không rỗng), cho phép bỏ qua lỗi ping timeout do mạng lag
 if [ -n "$PREFIX" ]; then
-    echo -e "✅ Tình trạng IPv6     : \e[32mThông mạng\e[0m"
+    echo -e "✅ Tình trạng IPv6     : \e[32mThông mạng (Card đã nhận IP)\e[0m"
     echo -e "🛰️  Dải IPv6 Detect    : \e[36m$PREFIX::/64\e[0m"
 else
-    if [ $PING_CHECK -ne 0 ]; then
-        echo -e "❌ Tình trạng IPv6     : \e[31mKhông phản hồi (No Internet IPv6)\e[0m"
-        echo "[-] Vui lòng kiểm tra lại cấu hình IPv6 trên MikroTik E50UG trước!"
-        exit 1
+    if [ $PING_CHECK -eq 0 ]; then
+        echo -e "✅ Tình trạng IPv6     : \e[32mThông mạng (Ping OK)\e[0m"
+    else
+        # Chỉ hiển thị cảnh báo để bạn lưu ý, TUYỆT ĐỐI KHÔNG DỪNG TOOL NỮA
+        echo -e "⚠️  Tình trạng IPv6     : \e[33mCảnh báo (Mạng phản hồi chậm hoặc ping cao)\e[0m"
+        echo "   [!] Tool vẫn sẽ tiếp tục chạy vì bạn đã xác nhận ping tay thông suốt."
     fi
 fi
 echo "=========================================================="
 
-# 4. Nhập liệu
+# 4. Nhập liệu (Bây giờ dải này chắc chắn sẽ hiện ra để bạn nhập)
 read -p "👉 Nhập cổng bắt đầu (VD: 10000): " INPUT_PORT < /dev/tty
 FIRST_PORT=$((10#$INPUT_PORT))
 read -p "👉 Nhập số lượng proxy muốn tạo: " PROXY_COUNT < /dev/tty
