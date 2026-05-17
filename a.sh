@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 - Bản Siêu Tốc (Check mạng trước khi nhập)
-# Tối ưu: Sửa lỗi chập chờn mạng, tràn bộ đệm Neighbor Table cho nhiều Phone
+# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Fix Lệnh Ping Check Mạng)
+# Tối ưu: Dùng ping -6 chuẩn xác, bóc Prefix trực tiếp từ card ens160
 # ==============================================================================
 
 clear
@@ -17,30 +17,35 @@ if [ -z "$INTERFACE" ]; then
     exit 1
 fi
 
-# Ép tự động kết nối nếu card bị tắt ngầm
+# Ép tự động kết nối card mạng
 nmcli connection modify "$INTERFACE" connection.autoconnect yes >/dev/null 2>&1
 nmcli device connect "$INTERFACE" >/dev/null 2>&1
 
-# 2. Thu thập dữ liệu mạng mạng để hiển thị trước
+# 2. Thu thập dữ liệu mạng và BÓC TÁCH PREFIX TRỰC TIẾP TỪ CARD MẠNG
 IP4=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1)
-IP6_RAW=$(curl -6 -s --max-time 5 icanhazip.com)
-PREFIX=$(echo $IP6_RAW | cut -f1-4 -d':')
 
-# 3. Hiển thị thông số cho người dùng kiểm tra trước
+# Lấy IP6 global đang chạy trên máy để bóc ra 4 cụm đầu (Prefix /64)
+IP6_LOCAL=$(ip -6 addr show $INTERFACE | grep 'scope global' | grep -v 'temporary' | awk '{print $2}' | head -n 1 | cut -d/ -f1)
+PREFIX=$(echo $IP6_LOCAL | cut -f1-4 -d':')
+
+# 3. Kiểm tra Internet IPv6 bằng lệnh ping -6 chuẩn của hệ thống
+PING_CHECK=$(ping -6 -c 1 -W 2 2001:4860:4860::8888 >/dev/null 2>&1; echo $?)
+
+# Hiển thị thông số cho người dùng kiểm tra trước
 echo -e "📱 Card mạng đang dùng : \e[32m$INTERFACE\e[0m"
-echo -e "🌐 IPv4 tĩnh của máy   : \e[32m$IP4\e[0m"
+echo -e "🌐 IPv4 của máy        : \e[32m$IP4\e[0m"
 
-if [ -z "$PREFIX" ]; then
+if [ $PING_CHECK -ne 0 ] || [ -z "$PREFIX" ]; then
     echo -e "❌ Tình trạng IPv6     : \e[31mKhông phản hồi (No Internet IPv6)\e[0m"
     echo "[-] Vui lòng kiểm tra lại cấu hình IPv6 trên MikroTik E50UG trước!"
     exit 1
 else
-    echo -e "✅ Tình trạng IPv6     : \e[32mThông mạng\e[0m"
-    echo -e "🛰️  Dải IPv6 Prefix    : \e[36m$PREFIX::/64\e[0m"
+    echo -e "✅ Tình trạng IPv6     : \e[32mThông mạng (Ping OK)\e[0m"
+    echo -e "🛰️  Dải IPv6 Detect    : \e[36m$PREFIX::/64\e[0m"
 fi
 echo "=========================================================="
 
-# 4. Nhập liệu (Sau khi đã check mọi thứ đều XANH)
+# 4. Nhập liệu
 read -p "👉 Nhập cổng bắt đầu (VD: 10000): " INPUT_PORT < /dev/tty
 FIRST_PORT=$((10#$INPUT_PORT))
 read -p "👉 Nhập số lượng proxy muốn tạo: " PROXY_COUNT < /dev/tty
@@ -64,25 +69,33 @@ if [ ! -f "/usr/local/etc/3proxy/bin/3proxy" ]; then
     chmod +x /usr/local/etc/3proxy/bin/3proxy
 fi
 
-# 6. Tối ưu hệ thống (Fix lỗi rớt mạng, chậm mạng khi cắm nhiều phone)
+# 6. Tối ưu hệ thống (Fix lỗi chập chờn cho phone)
 systemctl stop firewalld > /dev/null 2>&1
 setenforce 0 > /dev/null 2>&1
 sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1
 sysctl -w net.ipv6.conf.all.proxy_ndp=1 > /dev/null 2>&1
 
-# Nới rộng bảng Neighbor chống nghẽn đường truyền mạng IPv6
+# Nới rộng bảng Neighbor chống nghẽn mạng IPv6
 sysctl -w net.ipv6.neigh.default.gc_thresh1=2048 > /dev/null 2>&1
 sysctl -w net.ipv6.neigh.default.gc_thresh2=4096 > /dev/null 2>&1
 sysctl -w net.ipv6.neigh.default.gc_thresh3=8192 > /dev/null 2>&1
-
-# Mở rộng hàng đợi nhận gửi dữ liệu của card ens160 lên tối đa
 ethtool -G $INTERFACE rx 4096 tx 4096 >/dev/null 2>&1
+
+# Hàm tạo IP ngẫu nhiên dải /64
+array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
+gen_ipv6() {
+    rd() { echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"; }
+    echo "$PREFIX:$(rd):$(rd):$(rd):$(rd)"
+}
 
 # 7. Bước 1: Khởi tạo danh sách - CẬP NHẬT MỖI 1000
 echo "⏳ Bước 1: Đang chuẩn bị dữ liệu cho $PROXY_COUNT Proxy..."
 pkill 3proxy > /dev/null 2>&1
+
+# Xóa IP cũ và nạp lại cấu hình gốc
 ip -6 addr flush dev $INTERFACE scope global > /dev/null 2>&1
 nmcli connection up $INTERFACE > /dev/null 2>&1
+sleep 1
 
 echo -n "" > "$BATCH_FILE"
 exec 3> "$WORKDATA"
@@ -125,7 +138,7 @@ allow *
 $(awk -F "/" '{print "proxy -6 -n -a -p"$4" -i"$3" -e"$5}' ${WORKDATA})
 EOF
 
-# 10. Cấu hình Khởi động cùng hệ thống (Giữ lại các thông số tối ưu mạng)
+# 10. Cấu hình Khởi động cùng hệ thống
 chmod +x /etc/rc.d/rc.local
 {
     echo "ip -6 addr flush dev $INTERFACE scope global"
