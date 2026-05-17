@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Bản Bất Tử - Bypass Check Mạng)
-# Tối ưu: Không bao giờ thoát script giữa chừng, tối ưu cho 12 phone cắm E50UG
+# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Sửa Lỗi No Internet Khi Cắm Proxy)
+# Tối ưu: Tăng sleep chờ Gateway mạng quốc tế, tối ưu bảng Neighbor cho 12 phone
 # ==============================================================================
 
 clear
@@ -26,7 +26,7 @@ fi
 IP6_LOCAL=$(ip -6 addr show $INTERFACE | grep 'scope global' | grep -v 'temporary' | awk '{print $2}' | head -n 1 | cut -d/ -f1 2>/dev/null)
 PREFIX=$(echo $IP6_LOCAL | cut -f1-4 -d':')
 
-# 3. Hiển thị thông số (Chỉ hiển thị để xem, KHÔNG CHẶN EXIT NỮA)
+# 3. Hiển thị thông số
 echo -e "📱 Card mạng đang dùng : \e[32m$INTERFACE\e[0m"
 echo -e "🌐 IPv4 của máy        : \e[32m$IP4\e[0m"
 
@@ -35,18 +35,17 @@ if [ -n "$PREFIX" ] && [ ${#PREFIX} -gt 10 ]; then
     echo -e "🛰️  Dải IPv6 Tự Động   : \e[36m$PREFIX::/64\e[0m"
 else
     echo -e "⚠️  Tình trạng IPv6     : \e[33mKhông lấy được tự động (Mạng lag)\e[0m"
-    # Nếu không lấy được tự động, điền dải mặc định theo log trước của bạn để backup
     PREFIX="2405:4802:935:310"
     echo -e "🛰️  Dải IPv6 Dự Phòng  : \e[35m$PREFIX::/64\e[0m"
 fi
 echo "=========================================================="
 
-# 4. Nhập liệu (Đảm bảo luôn luôn hiển thị)
+# 4. Nhập liệu
 read -p "👉 Nhập cổng bắt đầu (VD: 10000): " INPUT_PORT < /dev/tty
 FIRST_PORT=$((10#$INPUT_PORT))
 read -p "👉 Nhập số lượng proxy muốn tạo: " PROXY_COUNT < /dev/tty
 
-# Cho phép xác nhận lại dải IP để chắc chắn tạo proxy là dùng được ngay
+# Xác nhận lại dải IP
 read -p "🛰️  Xác nhận dải IPv6 Prefix (Ấn Enter để giữ nguyên $PREFIX): " NEW_PREFIX < /dev/tty
 if [ -n "$NEW_PREFIX" ]; then
     PREFIX=$NEW_PREFIX
@@ -71,19 +70,19 @@ if [ ! -f "/usr/local/etc/3proxy/bin/3proxy" ]; then
     chmod +x /usr/local/etc/3proxy/bin/3proxy
 fi
 
-# 6. Tối ưu hệ thống (Fix lỗi chập chờn, mất kết nối trên 12 phone)
+# 6. Tối ưu hệ thống (Fix lỗi chập chờn cho phone)
 systemctl stop firewalld > /dev/null 2>&1
 setenforce 0 > /dev/null 2>&1
 sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1
 sysctl -w net.ipv6.conf.all.proxy_ndp=1 > /dev/null 2>&1
 
-# Nới rộng bảng Neighbor chống tràn bộ đệm mạng IPv6
+# Nới rộng bảng Neighbor chống nghẽn mạng IPv6 khi chạy nhiều máy cùng lúc
 sysctl -w net.ipv6.neigh.default.gc_thresh1=2048 > /dev/null 2>&1
 sysctl -w net.ipv6.neigh.default.gc_thresh2=4096 > /dev/null 2>&1
 sysctl -w net.ipv6.neigh.default.gc_thresh3=8192 > /dev/null 2>&1
 ethtool -G $INTERFACE rx 4096 tx 4096 >/dev/null 2>&1
 
-# Hàm tạo IP ngẫu nhiên dải /64 (Đặt cố định tại đây)
+# Hàm tạo IP ngẫu nhiên dải /64
 array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
 gen_ipv6() {
     rd() { echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"; }
@@ -94,10 +93,11 @@ gen_ipv6() {
 echo "⏳ Bước 1: Đang chuẩn bị dữ liệu cho $PROXY_COUNT Proxy..."
 pkill 3proxy > /dev/null 2>&1
 
-# Làm sạch cấu hình IP cũ
+# QUAN TRỌNG: Làm sạch và ép card mạng nhận lại Default Gateway đầy đủ
 ip -6 addr flush dev $INTERFACE scope global > /dev/null 2>&1
 nmcli connection up $INTERFACE > /dev/null 2>&1
-sleep 1
+echo "⏳ Đang đợi cấu hình định tuyến từ MikroTik (Nghỉ 5 giây)..."
+sleep 5 # Tăng từ 1s lên 5s để chấp cả mạng đi quốc tế ping 208ms
 
 echo -n "" > "$BATCH_FILE"
 exec 3> "$WORKDATA"
@@ -128,7 +128,7 @@ done
 rm -f ${WORKDIR}/split_batch_*
 echo -e "\n✅ Bước 2 hoàn tất."
 
-# 9. Ghi Config 3proxy (Giới hạn luồng maxconn 1024 để mượt RAM 2GB)
+# 9. Ghi Config 3proxy (Hạ maxconn xuống 1024 để tránh nghẽn RAM 2GB)
 cat <<EOF > /usr/local/etc/3proxy/3proxy.cfg
 daemon
 maxconn 1024
@@ -145,6 +145,7 @@ chmod +x /etc/rc.d/rc.local
 {
     echo "ip -6 addr flush dev $INTERFACE scope global"
     echo "nmcli connection up $INTERFACE"
+    echo "sleep 5"
     echo "ethtool -G $INTERFACE rx 4096 tx 4096"
     echo "sysctl -w net.ipv6.neigh.default.gc_thresh3=8192"
     echo "ip -6 -batch $BATCH_FILE"
