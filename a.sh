@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Fix Timeout Mạng Ping Cao)
-# Tối ưu: Chấp nhận ping cao (quốc tế), tự động bỏ qua nếu mạng lag nhưng vẫn có IP
+# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Bản Sửa Lỗi Cú Pháp)
+# Tối ưu: Bóc tách Prefix trực tiếp, tăng timeout ping mạng lag, tối ưu Neighbor
 # ==============================================================================
 
 clear
@@ -28,14 +28,14 @@ IP4=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1)
 IP6_LOCAL=$(ip -6 addr show $INTERFACE | grep 'scope global' | grep -v 'temporary' | awk '{print $2}' | head -n 1 | cut -d/ -f1)
 PREFIX=$(echo $IP6_LOCAL | cut -f1-4 -d':')
 
-# 3. Kiểm tra Internet IPv6 bằng lệnh ping -6 (Tăng thời gian chờ lên 5 giây để tránh lỗi mạng lag)
+# 3. Kiểm tra Internet IPv6 bằng lệnh ping -6 (Chờ tối đa 5 giây đề phòng mạng đi quốc tế ping cao)
 PING_CHECK=$(ping -6 -c 1 -W 5 2001:4860:4860::8888 >/dev/null 2>&1; echo $?)
 
 # Hiển thị thông số cho người dùng kiểm tra trước
 echo -e "📱 Card mạng đang dùng : \e[32m$INTERFACE\e[0m"
 echo -e "🌐 IPv4 của máy        : \e[32m$IP4\e[0m"
 
-# Nếu có sẵn IP6 trên card mạng (PREFIX không rỗng), cho phép chạy tiếp kể cả khi mạng lag ping timeout
+# Nếu card mạng đã có sẵn IP6 (PREFIX không rỗng), cho phép bỏ qua lỗi ping timeout do mạng lag
 if [ -n "$PREFIX" ]; then
     echo -e "✅ Tình trạng IPv6     : \e[32mThông mạng\e[0m"
     echo -e "🛰️  Dải IPv6 Detect    : \e[36m$PREFIX::/64\e[0m"
@@ -78,7 +78,7 @@ setenforce 0 > /dev/null 2>&1
 sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1
 sysctl -w net.ipv6.conf.all.proxy_ndp=1 > /dev/null 2>&1
 
-# Nới rộng bảng Neighbor chống nghẽn mạng IPv6
+# Nới rộng bảng Neighbor chống nghẽn mạng IPv6 khi chạy nhiều máy
 sysctl -w net.ipv6.neigh.default.gc_thresh1=2048 > /dev/null 2>&1
 sysctl -w net.ipv6.neigh.default.gc_thresh2=4096 > /dev/null 2>&1
 sysctl -w net.ipv6.neigh.default.gc_thresh3=8192 > /dev/null 2>&1
@@ -103,7 +103,7 @@ sleep 1
 echo -n "" > "$BATCH_FILE"
 exec 3> "$WORKDATA"
 for port in $(seq $FIRST_PORT $((FIRST_PORT + PROXY_COUNT - 1))); do
-    ipv6_rand=$| (gen_ipv6)
+    ipv6_rand=$(gen_ipv6)
     echo "//$IP4/$port/$ipv6_rand" >&3
     echo "addr add $ipv6_rand/64 dev $INTERFACE" >> "$BATCH_FILE"
     
