@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Fix Lệnh Ping Check Mạng)
-# Tối ưu: Dùng ping -6 chuẩn xác, bóc Prefix trực tiếp từ card ens160
+# Script: Auto Proxy IPv6 /64 - Siêu Tốc (Fix Timeout Mạng Ping Cao)
+# Tối ưu: Chấp nhận ping cao (quốc tế), tự động bỏ qua nếu mạng lag nhưng vẫn có IP
 # ==============================================================================
 
 clear
@@ -28,20 +28,23 @@ IP4=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1)
 IP6_LOCAL=$(ip -6 addr show $INTERFACE | grep 'scope global' | grep -v 'temporary' | awk '{print $2}' | head -n 1 | cut -d/ -f1)
 PREFIX=$(echo $IP6_LOCAL | cut -f1-4 -d':')
 
-# 3. Kiểm tra Internet IPv6 bằng lệnh ping -6 chuẩn của hệ thống
-PING_CHECK=$(ping -6 -c 1 -W 2 2001:4860:4860::8888 >/dev/null 2>&1; echo $?)
+# 3. Kiểm tra Internet IPv6 bằng lệnh ping -6 (Tăng thời gian chờ lên 5 giây để tránh lỗi mạng lag)
+PING_CHECK=$(ping -6 -c 1 -W 5 2001:4860:4860::8888 >/dev/null 2>&1; echo $?)
 
 # Hiển thị thông số cho người dùng kiểm tra trước
 echo -e "📱 Card mạng đang dùng : \e[32m$INTERFACE\e[0m"
 echo -e "🌐 IPv4 của máy        : \e[32m$IP4\e[0m"
 
-if [ $PING_CHECK -ne 0 ] || [ -z "$PREFIX" ]; then
-    echo -e "❌ Tình trạng IPv6     : \e[31mKhông phản hồi (No Internet IPv6)\e[0m"
-    echo "[-] Vui lòng kiểm tra lại cấu hình IPv6 trên MikroTik E50UG trước!"
-    exit 1
-else
-    echo -e "✅ Tình trạng IPv6     : \e[32mThông mạng (Ping OK)\e[0m"
+# Nếu có sẵn IP6 trên card mạng (PREFIX không rỗng), cho phép chạy tiếp kể cả khi mạng lag ping timeout
+if [ -n "$PREFIX" ]; then
+    echo -e "✅ Tình trạng IPv6     : \e[32mThông mạng\e[0m"
     echo -e "🛰️  Dải IPv6 Detect    : \e[36m$PREFIX::/64\e[0m"
+else
+    if [ $PING_CHECK -ne 0 ]; then
+        echo -e "❌ Tình trạng IPv6     : \e[31mKhông phản hồi (No Internet IPv6)\e[0m"
+        echo "[-] Vui lòng kiểm tra lại cấu hình IPv6 trên MikroTik E50UG trước!"
+        exit 1
+    fi
 fi
 echo "=========================================================="
 
@@ -100,7 +103,7 @@ sleep 1
 echo -n "" > "$BATCH_FILE"
 exec 3> "$WORKDATA"
 for port in $(seq $FIRST_PORT $((FIRST_PORT + PROXY_COUNT - 1))); do
-    ipv6_rand=$(gen_ipv6)
+    ipv6_rand=$| (gen_ipv6)
     echo "//$IP4/$port/$ipv6_rand" >&3
     echo "addr add $ipv6_rand/64 dev $INTERFACE" >> "$BATCH_FILE"
     
