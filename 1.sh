@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 Standard (Bản có Tiến độ Real-time)
+# Script: Auto Proxy IPv6 /64 Standard (Bản có Tiến độ Real-time - Đã Sửa Lỗi IPv6)
 # ==============================================================================
 
 # 1. Khởi tạo card mạng
@@ -13,7 +13,7 @@ fi
 
 clear
 echo "=========================================================="
-echo "   TOOL AUTO PROXY V6 - REAL-TIME PROGRESS               "
+echo "    TOOL AUTO PROXY V6 - REAL-TIME PROGRESS               "
 echo "=========================================================="
 
 # 2. Nhập liệu
@@ -44,17 +44,16 @@ systemctl stop firewalld > /dev/null 2>&1
 setenforce 0 > /dev/null 2>&1
 sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1
 
-# 5. Lấy Prefix /64 chuẩn từ card mạng
+# 5. Lấy Prefix /64 chuẩn trực tiếp từ card mạng hệ thống
 IP4=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1)
-IP6_RAW=$(curl -6 -s icanhazip.com)
-PREFIX=$(echo $IP6_RAW | cut -f1-4 -d':')
+PREFIX=$(ip -6 addr show dev $INTERFACE scope global | grep inet6 | awk '{print $2}' | cut -d/ -f1 | head -n 1 | cut -f1-4 -d':')
 
 if [ -z "$PREFIX" ]; then
-    echo "[-] LỖI: Không lấy được IPv6. Kiểm tra lại mạng máy ảo!"
+    echo "[-] LỖI: Không tìm thấy dải IPv6 Global nào trên card mạng $INTERFACE!"
     exit 1
 fi
 
-echo "=> IPv6 Detect: $PREFIX::/64"
+echo "=> IPv6 Detect thành công từ hệ thống: $PREFIX::/64"
 
 # 6. Hàm tạo IP ngẫu nhiên trong dải /64
 array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
