@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 Standard (Bản Tối Ưu Hiệu Năng & Tránh Treo Dịch Vụ)
+# Script: Auto Proxy IPv6 /64 Standard (Bản Tối Ưu Mặc Định Port & Hiệu Năng)
 # ==============================================================================
 
 # 1. Khởi tạo card mạng
@@ -16,10 +16,13 @@ echo "=========================================================="
 echo "    TOOL AUTO PROXY V6 - REAL-TIME PROGRESS               "
 echo "=========================================================="
 
-# 2. Nhập liệu
-read -p "Nhập cổng bắt đầu (Khuyến nghị từ 10001): " INPUT_PORT < /dev/tty
+# 2. Nhập liệu (Đã sửa lỗi tự động gán giá trị nếu bấm Enter trống)
+read -p "Nhập cổng bắt đầu (Mặc định 10001): " INPUT_PORT < /dev/tty
+INPUT_PORT=${INPUT_PORT:-10001}
 FIRST_PORT=$((10#$INPUT_PORT))
-read -p "Nhập số lượng proxy: " PROXY_COUNT < /dev/tty
+
+read -p "Nhập số lượng proxy (Mặc định 100): " PROXY_COUNT < /dev/tty
+PROXY_COUNT=${PROXY_COUNT:-100}
 
 WORKDIR="/home/proxy-v6"
 WORKDATA="${WORKDIR}/data.txt"
@@ -124,5 +127,4 @@ awk -F "/" '{print $3":"$4}' ${WORKDATA} > ${WORKDIR}/proxy.txt
 echo "=========================================================="
 echo "✅ HOÀN TẤT! Proxy đã sẵn sàng."
 echo "📂 List proxy: ${WORKDIR}/proxy.txt"
-echo "⚠️  LƯU Ý: Hãy đảm bảo bạn đã nhập Cổng bắt đầu > 1024 để tránh lỗi."
 echo "=========================================================="
