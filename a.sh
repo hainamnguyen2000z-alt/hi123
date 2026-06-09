@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 Standard (Bản Tối Ưu Mặc Định Port & Hiệu Năng)
+# Script: Auto Proxy IPv6 /64 Standard (Bản Chuẩn - Fix Lỗi Tràn Cổng Hệ Thống)
 # ==============================================================================
 
 # 1. Khởi tạo card mạng
@@ -16,13 +16,20 @@ echo "=========================================================="
 echo "    TOOL AUTO PROXY V6 - REAL-TIME PROGRESS               "
 echo "=========================================================="
 
-# 2. Nhập liệu (Đã sửa lỗi tự động gán giá trị nếu bấm Enter trống)
+# 2. Nhập liệu (Xử lý chuỗi và gán cứng cổng mặc định nếu bấm Enter trống)
 read -p "Nhập cổng bắt đầu (Mặc định 10001): " INPUT_PORT < /dev/tty
-INPUT_PORT=${INPUT_PORT:-10001}
-FIRST_PORT=$((10#$INPUT_PORT))
+if [ -z "$INPUT_PORT" ]; then
+    FIRST_PORT=10001
+else
+    FIRST_PORT=$((10#$INPUT_PORT))
+fi
 
-read -p "Nhập số lượng proxy (Mặc định 100): " PROXY_COUNT < /dev/tty
-PROXY_COUNT=${PROXY_COUNT:-100}
+read -p "Nhập số lượng proxy (Mặc định 100): " INPUT_COUNT < /dev/tty
+if [ -z "$INPUT_COUNT" ]; then
+    PROXY_COUNT=100
+else
+    PROXY_COUNT=$((10#$INPUT_COUNT))
+fi
 
 WORKDIR="/home/proxy-v6"
 WORKDATA="${WORKDIR}/data.txt"
@@ -47,7 +54,6 @@ systemctl stop firewalld > /dev/null 2>&1
 systemctl disable firewalld > /dev/null 2>&1
 setenforce 0 > /dev/null 2>&1
 sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1
-# Mở rộng dải port local của hệ điều hành để tránh nghẽn hàng đợi kết nối
 sysctl -w net.ipv4.ip_local_port_range="1024 65535" > /dev/null 2>&1
 
 # 5. Lấy Prefix /64 chuẩn trực tiếp từ card mạng hệ thống
@@ -68,7 +74,7 @@ gen_ipv6_64() {
     echo "$PREFIX:$(rd):$(rd):$(rd):$(rd)"
 }
 
-# 7. Tạo danh sách cấu hình
+# 7. Tạo danh sách cấu hình (Đã ép biến FIRST_PORT chuẩn)
 echo "⏳ Bước 1: Đang khởi tạo danh sách cấu hình..."
 pkill 3proxy > /dev/null 2>&1
 ip -6 addr flush dev $INTERFACE scope global > /dev/null 2>&1
@@ -89,14 +95,13 @@ for ipv6 in $(awk -F "/" '{print $5}' "$WORKDATA"); do
     ip -6 addr add "$ipv6/64" dev "$INTERFACE"
     count=$((count + 1))
     
-    # Hiển thị nhảy số Real-time tại đây
     if (( count % 10 == 0 || count == PROXY_COUNT )); then
         echo -ne "   [+] Đang nạp: $count / $PROXY_COUNT \r"
     fi
 done
 echo -e "\n✅ Đã nạp xong $count IP vào hệ thống."
 
-# 9. Ghi Config 3proxy (Đã tối ưu kết nối và thêm DNS IPv6 cho Facebook)
+# 9. Ghi Config 3proxy (Tối ưu DNS v6 + Timeouts dọn dẹp hàng đợi kết nối)
 cat <<EOF > /usr/local/etc/3proxy/3proxy.cfg
 daemon
 maxconn 65535
@@ -113,13 +118,12 @@ EOF
 # 10. Tự động chạy khi reboot
 chmod +x /etc/rc.d/rc.local
 sed -i '/3proxy/d' /etc/rc.d/rc.local
-# Tạo file boot đơn giản để nạp IP khi khởi động lại
 echo "ip -6 addr flush dev $INTERFACE scope global" > "${WORKDIR}/boot_ifconfig.sh"
 awk -F "/" '{print "ip -6 addr add "$5"/64 dev '$INTERFACE'"}' "$WORKDATA" >> "${WORKDIR}/boot_ifconfig.sh"
 echo "bash ${WORKDIR}/boot_ifconfig.sh" >> /etc/rc.d/rc.local
 echo "/usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg" >> /etc/rc.d/rc.local
 
-# Khởi chạy 3proxy với giới hạn file descriptor cao nhất
+# Khởi chạy 3proxy
 ulimit -n 999999
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
 awk -F "/" '{print $3":"$4}' ${WORKDATA} > ${WORKDIR}/proxy.txt
