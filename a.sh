@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# Script: Auto Proxy IPv6 /64 Standard (Bản Chuẩn - Fix Lỗi Tràn Cổng Hệ Thống)
+# Script: Auto Proxy IPv6 /64 Standard - HIGH STABILITY EDITION
 # ==============================================================================
 
 # 1. Khởi tạo card mạng
@@ -13,27 +13,21 @@ fi
 
 clear
 echo "=========================================================="
-echo "    TOOL AUTO PROXY V6 - REAL-TIME PROGRESS               "
+echo "    TOOL AUTO PROXY V6 - ULTRA STABILITY (FIX DROPPED)   "
 echo "=========================================================="
 
-# 2. Nhập liệu (Xử lý chuỗi và gán cứng cổng mặc định nếu bấm Enter trống)
+# 2. Nhập liệu (Xử lý chuỗi và gán cứng cổng mặc định)
 read -p "Nhập cổng bắt đầu (Mặc định 10001): " INPUT_PORT < /dev/tty
-if [ -z "$INPUT_PORT" ]; then
-    FIRST_PORT=10001
-else
-    FIRST_PORT=$((10#$INPUT_PORT))
-fi
+FIRST_PORT=${INPUT_PORT:-10001}
+FIRST_PORT=$((10#$FIRST_PORT))
 
 read -p "Nhập số lượng proxy (Mặc định 100): " INPUT_COUNT < /dev/tty
-if [ -z "$INPUT_COUNT" ]; then
-    PROXY_COUNT=100
-else
-    PROXY_COUNT=$((10#$INPUT_COUNT))
-fi
+PROXY_COUNT=${INPUT_COUNT:-100}
+PROXY_COUNT=$((10#$PROXY_COUNT))
 
 WORKDIR="/home/proxy-v6"
 WORKDATA="${WORKDIR}/data.txt"
-mkdir -p $WORKDIR
+mkdir -p "$WORKDIR"
 
 # 3. Cài đặt môi trường & 3proxy
 if [ ! -f "/usr/local/etc/3proxy/bin/3proxy" ]; then
@@ -49,16 +43,38 @@ if [ ! -f "/usr/local/etc/3proxy/bin/3proxy" ]; then
     chmod +x /usr/local/etc/3proxy/bin/3proxy
 fi
 
-# 4. Dọn dẹp hệ thống & Tối ưu tham số mạng nhân Kernel
+# 4. TỐI ƯU KERNEL SÂU (Chống nghẽn Port & Tràn bảng IPv6 Neighbor sau nhiều ngày)
 systemctl stop firewalld > /dev/null 2>&1
 systemctl disable firewalld > /dev/null 2>&1
 setenforce 0 > /dev/null 2>&1
-sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1
-sysctl -w net.ipv4.ip_local_port_range="1024 65535" > /dev/null 2>&1
 
-# 5. Lấy Prefix /64 chuẩn trực tiếp từ card mạng hệ thống
-IP4=$(ip -4 addr show $INTERFACE | grep inet | awk '{print $2}' | cut -d/ -f1)
-PREFIX=$(ip -6 addr show dev $INTERFACE scope global | grep inet6 | awk '{print $2}' | cut -d/ -f1 | head -n 1 | cut -f1-4 -d':')
+cat <<EOF > /etc/sysctl.d/99-proxy-tuning.conf
+net.ipv6.conf.all.forwarding=1
+net.ipv6.conf.default.forwarding=1
+net.ipv4.ip_local_port_range=1024 65535
+# Mở rộng bộ nhớ đệm bảng Neighbor định tuyến v6 tránh mất kết nối (Quan trọng)
+net.ipv6.neigh.default.gc_thresh1=2048
+net.ipv6.neigh.default.gc_thresh2=4096
+net.ipv6.neigh.default.gc_thresh3=8192
+net.ipv4.tcp_max_syn_backlog=65536
+net.core.somaxconn=65535
+net.ipv4.tcp_rmem=4096 87380 16777216
+net.ipv4.tcp_wmem=4096 65536 16777216
+net.ipv4.tcp_tw_reuse=1
+EOF
+sysctl --system > /dev/null 2>&1
+
+# Tăng giới hạn File Descriptors toàn hệ thống
+cat <<EOF > /etc/security/limits.d/99-3proxy.conf
+* soft nofile 999999
+* hard nofile 999999
+root soft nofile 999999
+root hard nofile 999999
+EOF
+
+# 5. Lấy Prefix /64 chuẩn từ hệ thống
+IP4=$(ip -4 addr show "$INTERFACE" | grep inet | awk '{print $2}' | cut -d/ -f1 | head -n 1)
+PREFIX=$(ip -6 addr show dev "$INTERFACE" scope global | grep inet6 | awk '{print $2}' | cut -d/ -f1 | head -n 1 | cut -f1-4 -d':')
 
 if [ -z "$PREFIX" ]; then
     echo "[-] LỖI: Không tìm thấy dải IPv6 Global nào trên card mạng $INTERFACE!"
@@ -67,68 +83,69 @@ fi
 
 echo "=> IPv6 Detect thành công từ hệ thống: $PREFIX::/64"
 
-# 6. Hàm tạo IP ngẫu nhiên trong dải /64
-array=(1 2 3 4 5 6 7 8 9 0 a b c d e f)
-gen_ipv6_64() {
-    rd() { echo "${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}${array[$RANDOM % 16]}"; }
-    echo "$PREFIX:$(rd):$(rd):$(rd):$(rd)"
+# 6. Hàm tạo IP ngẫu nhiên siêu tốc (Tối ưu bằng openssl, tránh nghẽn ram)
+gen_ipv6_64_fast() {
+    local rand_part
+    rand_part=$(openssl rand -hex 8 | sed 's/\(....\)\(....\)\(....\)\(....\)/\1:\2:\3:\4/')
+    echo "$PREFIX:$rand_part"
 }
 
-# 7. Tạo danh sách cấu hình (Đã ép biến FIRST_PORT chuẩn)
+# 7. Khởi tạo lại Network
 echo "⏳ Bước 1: Đang khởi tạo danh sách cấu hình..."
-pkill 3proxy > /dev/null 2>&1
-ip -6 addr flush dev $INTERFACE scope global > /dev/null 2>&1
-nmcli connection up $INTERFACE > /dev/null 2>&1
+pkill -9 3proxy > /dev/null 2>&1
+ip -6 addr flush dev "$INTERFACE" scope global > /dev/null 2>&1
+nmcli connection up "$INTERFACE" > /dev/null 2>&1
 sleep 1
 
-exec 3> "$WORKDATA"
-for port in $(seq $FIRST_PORT $((FIRST_PORT + PROXY_COUNT - 1))); do
-    ipv6_rand=$(gen_ipv6_64)
-    echo "//$IP4/$port/$ipv6_rand" >&3
+# Tạo data.txt
+> "$WORKDATA"
+for ((port=FIRST_PORT; port<FIRST_PORT+PROXY_COUNT; port++)); do
+    ipv6_rand=$(gen_ipv6_64_fast)
+    echo "//$IP4/$port/$ipv6_rand" >> "$WORKDATA"
 done
-exec 3>&-
 
-# 8. Nạp IP vào card mạng với thanh TIẾN ĐỘ REAL-TIME
-echo "⏳ Bước 2: Đang nạp IP vào card mạng (Vui lòng đợi)..."
-count=0
-for ipv6 in $(awk -F "/" '{print $5}' "$WORKDATA"); do
-    ip -6 addr add "$ipv6/64" dev "$INTERFACE"
-    count=$((count + 1))
-    
-    if (( count % 10 == 0 || count == PROXY_COUNT )); then
-        echo -ne "   [+] Đang nạp: $count / $PROXY_COUNT \r"
-    fi
-done
-echo -e "\n✅ Đã nạp xong $count IP vào hệ thống."
+# 8. Nạp IP vào card mạng bằng chế độ Batch (Nhanh gấp 10 lần, không lỗi hàng đợi)
+echo "⏳ Bước 2: Đang nạp IP vào card mạng bằng chế độ Batch..."
+BATCH_FILE="${WORKDIR}/ip_batch.txt"
+> "$BATCH_FILE"
 
-# 9. Ghi Config 3proxy (Tối ưu DNS v6 + Timeouts dọn dẹp hàng đợi kết nối)
+awk -F "/" -v dev="$INTERFACE" '{print "addr add " $5 "/64 dev " dev}' "$WORKDATA" > "$BATCH_FILE"
+ip -batch "$BATCH_FILE"
+echo "✅ Đã nạp xong $PROXY_COUNT IP vào hệ thống."
+
+# 9. Ghi Config 3proxy (Bổ sung DNS dự phòng và cấu hình phân luồng tải lớn)
 cat <<EOF > /usr/local/etc/3proxy/3proxy.cfg
 daemon
 maxconn 65535
 nserver 8.8.8.8
 nserver 1.1.1.1
 nserver 2001:4860:4860::8888
+nserver 2606:4700:4700::1111
 nscache 65536
 timeouts 1 5 30 60 180 15 60
 auth none
 allow *
-$(awk -F "/" '{print "proxy -6 -n -a -p"$4" -i"$3" -e"$5}' ${WORKDATA})
+$(awk -F "/" '{print "proxy -6 -n -a -p"$4" -i"$3" -e"$5}' "$WORKDATA")
 EOF
 
-# 10. Tự động chạy khi reboot
+# 10. Đồng bộ hóa File Boot (Đảm bảo sau khi reboot không bị rớt ulimit)
 chmod +x /etc/rc.d/rc.local
 sed -i '/3proxy/d' /etc/rc.d/rc.local
+sed -i '/boot_ifconfig/d' /etc/rc.d/rc.local
+
 echo "ip -6 addr flush dev $INTERFACE scope global" > "${WORKDIR}/boot_ifconfig.sh"
-awk -F "/" '{print "ip -6 addr add "$5"/64 dev '$INTERFACE'"}' "$WORKDATA" >> "${WORKDIR}/boot_ifconfig.sh"
+cat "$BATCH_FILE" >> "${WORKDIR}/boot_ifconfig.sh"
+
+echo "ulimit -n 999999" >> /etc/rc.d/rc.local
 echo "bash ${WORKDIR}/boot_ifconfig.sh" >> /etc/rc.d/rc.local
 echo "/usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg" >> /etc/rc.d/rc.local
 
-# Khởi chạy 3proxy
+# Khởi chạy 3proxy với giới hạn tài nguyên tối đa
 ulimit -n 999999
 /usr/local/etc/3proxy/bin/3proxy /usr/local/etc/3proxy/3proxy.cfg
-awk -F "/" '{print $3":"$4}' ${WORKDATA} > ${WORKDIR}/proxy.txt
+awk -F "/" '{print $3":"$4}' "$WORKDATA" > "${WORKDIR}/proxy.txt"
 
 echo "=========================================================="
-echo "✅ HOÀN TẤT! Proxy đã sẵn sàng."
+echo "✅ HOÀN TẤT! Proxy đã sẵn sàng và tối ưu chạy dài ngày."
 echo "📂 List proxy: ${WORKDIR}/proxy.txt"
 echo "=========================================================="
